@@ -155,6 +155,40 @@ body {
   color: #94a3b8;
 }
 
+.countdown-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.countdown-card {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 7px 8px;
+  text-align: center;
+}
+.cd-label {
+  display: block;
+  font-size: 10px;
+  color: #94a3b8;
+  margin-bottom: 2px;
+}
+.cd-time {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #10b981;
+}
+.cd-time.busy {
+  color: #38bdf8;
+  font-size: 12px;
+}
+.cd-time.off {
+  color: #64748b;
+}
+
 .card {
   background: #1e293b;
   border: 1px solid #334155;

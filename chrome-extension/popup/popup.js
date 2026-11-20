@@ -98,11 +98,72 @@ function syncCustomModelVisibility() {
   $('customModelWrap').classList.toggle('hidden', $('model').value !== 'custom');
 }
 
+let currentSettings = null;
+let currentSchedule = { lastMsgScanAt: 0, lastCmtScanAt: 0, activeLane: null };
+let countdownTimer = null;
+
+function formatTimer(sec) {
+  const s = Math.max(0, Math.ceil(sec));
+  const mins = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
+}
+
+function renderCountdowns() {
+  const msgEl = $('cdMsg');
+  const cmtEl = $('cdCmt');
+  if (!msgEl || !cmtEl || !currentSettings) return;
+
+  if (!currentSettings.enabled) {
+    msgEl.textContent = 'Tạm dừng';
+    msgEl.className = 'cd-time off';
+    cmtEl.textContent = 'Tạm dừng';
+    cmtEl.className = 'cd-time off';
+    return;
+  }
+
+  const now = Date.now();
+
+  if (!currentSettings.enableMessages) {
+    msgEl.textContent = 'Đang tắt';
+    msgEl.className = 'cd-time off';
+  } else if (currentSchedule.activeLane === 'messages') {
+    msgEl.textContent = 'Đang quét...';
+    msgEl.className = 'cd-time busy';
+  } else {
+    const intervalSec = Math.max(10, Number(currentSettings.messageScanIntervalSec) || 20);
+    const remSec = currentSchedule.lastMsgScanAt
+      ? Math.max(0, intervalSec - (now - currentSchedule.lastMsgScanAt) / 1000)
+      : intervalSec;
+    msgEl.textContent = formatTimer(remSec);
+    msgEl.className = 'cd-time';
+  }
+
+  const cmtEnabled = Boolean(currentSettings.enableBusinessComments || currentSettings.enableActivityComments);
+  if (!cmtEnabled) {
+    cmtEl.textContent = 'Đang tắt';
+    cmtEl.className = 'cd-time off';
+  } else if (currentSchedule.activeLane === 'comments') {
+    cmtEl.textContent = 'Đang quét...';
+    cmtEl.className = 'cd-time busy';
+  } else {
+    const intervalSec = Math.max(15, Number(currentSettings.commentScanIntervalSec) || 60);
+    const remSec = currentSchedule.lastCmtScanAt
+      ? Math.max(0, intervalSec - (now - currentSchedule.lastCmtScanAt) / 1000)
+      : intervalSec;
+    cmtEl.textContent = formatTimer(remSec);
+    cmtEl.className = 'cd-time';
+  }
+}
+
 async function loadState() {
   const res = await sendBg({ action: 'GET_STATE' });
   if (!res?.ok) return;
 
-  const { settings, stats, logs } = res;
+  const { settings, stats, logs, schedule } = res;
+  currentSettings = settings;
+  if (schedule) currentSchedule = schedule;
+
   $('toggleEnabled').checked = Boolean(settings.enabled);
   $('statusDot').classList.toggle('on', Boolean(settings.enabled));
 
@@ -130,13 +191,28 @@ async function loadState() {
   $('statErr').textContent = stats.errors || 0;
 
   renderLogs(logs);
+  renderCountdowns();
+}
+
+async function refreshLiveSchedule() {
+  const res = await sendBg({ action: 'GET_STATE' });
+  if (!res?.ok) return;
+  currentSettings = res.settings;
+  if (res.schedule) currentSchedule = res.schedule;
+  $('statMsg').textContent = res.stats?.messagesReplied || 0;
+  $('statCmt').textContent = res.stats?.commentsReplied || 0;
+  $('statDraft').textContent = res.stats?.draftsCreated || 0;
+  $('statErr').textContent = res.stats?.errors || 0;
+  renderCountdowns();
 }
 
 async function saveAll(silent = false) {
   const payload = collectFormSettings();
   const res = await sendBg({ action: 'SAVE_SETTINGS', payload });
   if (res?.ok) {
+    currentSettings = res.settings;
     $('statusDot').classList.toggle('on', Boolean(payload.enabled));
+    renderCountdowns();
     if (!silent) showToast('Đã lưu cài đặt!');
   } else {
     showToast(res?.error || 'Lỗi lưu cài đặt', true);
@@ -220,3 +296,7 @@ $('btnClearDedupe').addEventListener('click', async () => {
 });
 
 loadState();
+countdownTimer = setInterval(() => {
+  renderCountdowns();
+}, 1000);
+setInterval(refreshLiveSchedule, 3000);

@@ -4,7 +4,8 @@ const STORAGE_KEYS = {
   SETTINGS: 'tt_ar_settings',
   LOGS: 'tt_ar_logs',
   PROCESSED: 'tt_ar_processed',
-  STATS: 'tt_ar_stats'
+  STATS: 'tt_ar_stats',
+  SCHEDULE: 'tt_ar_schedule'
 };
 
 const DEFAULT_SETTINGS = {
@@ -345,17 +346,36 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     try {
       switch (message?.action) {
         case 'GET_STATE': {
-          const [settings, stats, logsRes] = await Promise.all([
+          const [settings, stats, logsRes, schedRes] = await Promise.all([
             getSettings(),
             getStats(),
-            chrome.storage.local.get(STORAGE_KEYS.LOGS)
+            chrome.storage.local.get(STORAGE_KEYS.LOGS),
+            chrome.storage.local.get(STORAGE_KEYS.SCHEDULE)
           ]);
           sendResponse({
             ok: true,
             settings,
             stats,
-            logs: logsRes[STORAGE_KEYS.LOGS] || []
+            logs: logsRes[STORAGE_KEYS.LOGS] || [],
+            schedule: schedRes[STORAGE_KEYS.SCHEDULE] || {
+              lastMsgScanAt: 0,
+              lastCmtScanAt: 0,
+              activeLane: null
+            }
           });
+          break;
+        }
+        case 'UPDATE_SCHEDULE': {
+          const curRes = await chrome.storage.local.get(STORAGE_KEYS.SCHEDULE);
+          const nextSched = {
+            lastMsgScanAt: 0,
+            lastCmtScanAt: 0,
+            activeLane: null,
+            ...(curRes[STORAGE_KEYS.SCHEDULE] || {}),
+            ...(message.payload || {})
+          };
+          await chrome.storage.local.set({ [STORAGE_KEYS.SCHEDULE]: nextSched });
+          sendResponse({ ok: true, schedule: nextSched });
           break;
         }
         case 'SAVE_SETTINGS': {

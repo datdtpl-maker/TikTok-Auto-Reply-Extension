@@ -1,4 +1,4 @@
-// content/main.js - Orchestrator phân lịch độc lập giữa Quét Tin nhắn & Quét Bình luận
+// content/main.js - Orchestrator phân lịch độc lập + Đếm ngược từng giây cho Tin nhắn & Bình luận
 
 window.TTAR = window.TTAR || {};
 
@@ -25,12 +25,62 @@ window.TTAR = window.TTAR || {};
     sessionStorage.setItem(key, String(val));
   }
 
+  function formatCountdown(sec) {
+    const s = Math.max(0, Math.ceil(sec));
+    const mins = Math.floor(s / 60);
+    const rem = s % 60;
+    return mins > 0
+      ? `${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`
+      : `${rem}s`;
+  }
+
+  async function syncScheduleToBg(partial) {
+    await sendRuntimeMessage({ action: 'UPDATE_SCHEDULE', payload: partial });
+  }
+
   async function loadSettings() {
     const res = await sendRuntimeMessage({ action: 'GET_STATE' });
     if (res?.ok && res.settings) {
       settings = res.settings;
+      if (res.schedule) {
+        if (!getLastTs(LAST_MSG_KEY) && res.schedule.lastMsgScanAt) {
+          setLastTs(LAST_MSG_KEY, res.schedule.lastMsgScanAt);
+        }
+        if (!getLastTs(LAST_CMT_KEY) && res.schedule.lastCmtScanAt) {
+          setLastTs(LAST_CMT_KEY, res.schedule.lastCmtScanAt);
+        }
+      }
     }
     return settings;
+  }
+
+  function renderCountdownPill() {
+    if (!settings?.enabled) {
+      StatusOverlay.update('idle', 'TikTok AI: Đang tạm dừng');
+      return;
+    }
+    if (isScanning || pausedOnDraft) return;
+
+    const now = Date.now();
+    const msgIntervalMs = Math.max(10, Number(settings.messageScanIntervalSec) || 20) * 1000;
+    const cmtIntervalMs = Math.max(15, Number(settings.commentScanIntervalSec) || 60) * 1000;
+
+    const parts = [settings.draftOnly ? 'Nháp' : 'Auto'];
+
+    if (bs.isBusinessSuitePage() && settings.enableMessages) {
+      const remMsg = Math.max(0, (msgIntervalMs - (now - getLastTs(LAST_MSG_KEY))) / 1000);
+      parts.push(`TN: ${formatCountdown(remMsg)}`);
+    }
+
+    if (
+      (bs.isBusinessSuitePage() && settings.enableBusinessComments) ||
+      (act.isTikTokMainSite() && settings.enableActivityComments)
+    ) {
+      const remCmt = Math.max(0, (cmtIntervalMs - (now - getLastTs(LAST_CMT_KEY))) / 1000);
+      parts.push(`BL: ${formatCountdown(remCmt)}`);
+    }
+
+    StatusOverlay.update('running', parts.join(' • '));
   }
 
   async function runOneCycle(options = {}) {
@@ -61,39 +111,38 @@ window.TTAR = window.TTAR || {};
       if (bs.isBusinessSuitePage()) {
         if (runMsg && settings.enableMessages) {
           const count = Number(settings.messageScanCount) || 10;
+          await syncScheduleToBg({ activeLane: 'messages' });
           StatusOverlay.update('busy', `Đang quét ${count} hội thoại Tin nhắn gần nhất...`);
           msgResult = await bs.scanBusinessMessages(settings);
-          setLastTs(LAST_MSG_KEY);
+          const doneAt = Date.now();
+          setLastTs(LAST_MSG_KEY, doneAt);
+          await syncScheduleToBg({ lastMsgScanAt: doneAt, activeLane: null });
         }
 
         if (runCmt && settings.enableBusinessComments && !msgResult.stoppedForDraft) {
           if (runMsg && settings.enableMessages) await sleep(800);
           const vCount = Number(settings.commentVideoCount) || 5;
+          await syncScheduleToBg({ activeLane: 'comments' });
           StatusOverlay.update('busy', `Đang quét ${vCount} video Bình luận gần nhất...`);
           cmtResult = await bs.scanBusinessComments(settings);
-          setLastTs(LAST_CMT_KEY);
+          const doneAt = Date.now();
+          setLastTs(LAST_CMT_KEY, doneAt);
+          await syncScheduleToBg({ lastCmtScanAt: doneAt, activeLane: null });
         }
 
         if (msgResult.stoppedForDraft || cmtResult.stoppedForDraft) {
           pausedOnDraft = true;
         } else {
           pausedOnDraft = false;
-          const modeLabel = settings.draftOnly ? 'Nháp' : 'Auto';
-          StatusOverlay.update(
-            'running',
-            `BS (${modeLabel}) • Quét #${cycleCount} • TN:${msgResult.replied} BL:${cmtResult.replied}`
-          );
         }
       } else if (act.isTikTokMainSite()) {
         if (runCmt && settings.enableActivityComments) {
+          await syncScheduleToBg({ activeLane: 'comments' });
           StatusOverlay.update('busy', 'Đang quét Hoạt động → Bình luận...');
           cmtResult = await act.scanActivityComments(settings);
-          setLastTs(LAST_CMT_KEY);
-          const modeLabel = settings.draftOnly ? 'Nháp' : 'Auto';
-          StatusOverlay.update(
-            'running',
-            `Hoạt động (${modeLabel}) • Quét #${cycleCount} • BL:${cmtResult.replied}`
-          );
+          const doneAt = Date.now();
+          setLastTs(LAST_CMT_KEY, doneAt);
+          await syncScheduleToBg({ lastCmtScanAt: doneAt, activeLane: null });
         } else {
           StatusOverlay.update('idle', 'TikTok AI: Chế độ Hoạt động đang tắt');
         }
@@ -101,6 +150,7 @@ window.TTAR = window.TTAR || {};
 
       return { ok: true, msgResult, cmtResult };
     } catch (err) {
+      await syncScheduleToBg({ activeLane: null });
       StatusOverlay.update('error', `Lỗi quét: ${(err?.message || '').slice(0, 42)}`);
       await sendRuntimeMessage({
         action: 'LOG_EVENT',
@@ -115,13 +165,21 @@ window.TTAR = window.TTAR || {};
       return { ok: false, error: err?.message || String(err) };
     } finally {
       isScanning = false;
+      renderCountdownPill();
     }
   }
 
-  function checkAndRunDueLanes(allowReload = true) {
-    if (!settings?.enabled || document.visibilityState !== 'visible' || isScanning || pausedOnDraft) {
+  function tickScheduler() {
+    if (!settings?.enabled) {
+      StatusOverlay.update('idle', 'TikTok AI: Đang tạm dừng');
       return;
     }
+
+    if (isScanning || pausedOnDraft) return;
+
+    renderCountdownPill();
+
+    if (document.visibilityState !== 'visible') return;
 
     const now = Date.now();
     const msgIntervalMs = Math.max(10, Number(settings.messageScanIntervalSec) || 20) * 1000;
@@ -139,7 +197,7 @@ window.TTAR = window.TTAR || {};
 
     if (!msgDue && !cmtDue) return;
 
-    if (allowReload && settings.autoReloadBeforeScan) {
+    if (settings.autoReloadBeforeScan) {
       StatusOverlay.update('busy', 'Đang F5 làm mới để bắt tin nhắn/bình luận mới...');
       sessionStorage.setItem(RELOAD_FLAG_KEY, JSON.stringify({ runMsg: msgDue, runCmt: cmtDue }));
       window.location.reload();
@@ -156,24 +214,31 @@ window.TTAR = window.TTAR || {};
     }
 
     if (!settings?.enabled) {
+      syncScheduleToBg({ activeLane: null });
       StatusOverlay.update('idle', 'TikTok AI: Đang tạm dừng');
       return;
     }
 
-    const msgSec = Math.max(10, Number(settings.messageScanIntervalSec) || 20);
-    const cmtSec = Math.max(15, Number(settings.commentScanIntervalSec) || 60);
-    StatusOverlay.update(
-      'running',
-      `TikTok AI (${settings.draftOnly ? 'Nháp' : 'Auto'}) • TN:${msgSec}s • BL:${cmtSec}s`
-    );
+    // Khởi tạo mốc đếm ngược nếu chưa có
+    const now = Date.now();
+    if (!getLastTs(LAST_MSG_KEY)) {
+      setLastTs(LAST_MSG_KEY, now);
+      syncScheduleToBg({ lastMsgScanAt: now });
+    }
+    if (!getLastTs(LAST_CMT_KEY)) {
+      setLastTs(LAST_CMT_KEY, now);
+      syncScheduleToBg({ lastCmtScanAt: now });
+    }
+
+    renderCountdownPill();
 
     if (runImmediately) {
       const lanes = immediateLanes || { runMsg: true, runCmt: true };
       setTimeout(() => runOneCycle({ manual: false, ...lanes }), 2000);
     }
 
-    // Kiểm tra lịch độc lập mỗi 3 giây
-    timerId = setInterval(() => checkAndRunDueLanes(true), 3000);
+    // Cập nhật đồng hồ đếm ngược mỗi 1 giây
+    timerId = setInterval(() => tickScheduler(), 1000);
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -214,6 +279,6 @@ window.TTAR = window.TTAR || {};
     }
     await sleep(reloadLanes ? 2600 : 1200);
     await loadSettings();
-    restartScheduler(Boolean(reloadLanes || settings?.enabled), reloadLanes);
+    restartScheduler(Boolean(reloadLanes), reloadLanes);
   })();
 })(window.TTAR);
