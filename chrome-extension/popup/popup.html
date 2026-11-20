@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TikTok Auto-Reply Gemini AI</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="brand">
+        <span class="brand-dot" id="statusDot"></span>
+        <div>
+          <h1>TikTok Auto-Reply AI</h1>
+          <p class="subtitle">Gemini API Trực tiếp • Tin nhắn & Bình luận</p>
+        </div>
+      </div>
+      <label class="switch" title="Bật / Tắt tự động quét">
+        <input type="checkbox" id="toggleEnabled" />
+        <span class="slider"></span>
+      </label>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="control">Điều khiển</button>
+      <button class="tab" data-tab="gemini">Gemini AI</button>
+      <button class="tab" data-tab="logs">Nhật ký</button>
+    </nav>
+
+    <!-- TAB 1: ĐIỀU KHIỂN -->
+    <section class="panel active" id="tab-control">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <span class="stat-num" id="statMsg">0</span>
+          <span class="stat-label">Tin nhắn</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-num" id="statCmt">0</span>
+          <span class="stat-label">Bình luận</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-num" id="statDraft">0</span>
+          <span class="stat-label">Nháp</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-num err" id="statErr">0</span>
+          <span class="stat-label">Lỗi</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-toggle">
+          <div>
+            <div class="row-title">Phần 1: Quét Tin nhắn (Business Suite)</div>
+            <div class="row-desc">Tự mở tin chưa đọc & trả lời trên business-suite/messages</div>
+          </div>
+          <input type="checkbox" id="enableMessages" />
+        </div>
+
+        <div class="row-toggle">
+          <div>
+            <div class="row-title">Phần 2A: Tab Bình luận (Business Suite)</div>
+            <div class="row-desc">Chuyển tab Bình luận ngay trong trang Business Suite</div>
+          </div>
+          <input type="checkbox" id="enableBusinessComments" />
+        </div>
+
+        <div class="row-toggle">
+          <div>
+            <div class="row-title">Phần 2B: Hoạt động → Bình luận (tiktok.com)</div>
+            <div class="row-desc">Bấm Hoạt động → tab Bình luận trên trang chủ TikTok</div>
+          </div>
+          <input type="checkbox" id="enableActivityComments" />
+        </div>
+
+        <div class="row-toggle">
+          <div>
+            <div class="row-title">Tự F5 làm mới trước mỗi vòng quét</div>
+            <div class="row-desc">Tải lại trang định kỳ để bắt tin nhắn & bình luận mới nhất</div>
+          </div>
+          <input type="checkbox" id="autoReloadBeforeScan" />
+        </div>
+
+        <div class="row-toggle highlight">
+          <div>
+            <div class="row-title">Chế độ Nháp (Không tự bấm Gửi)</div>
+            <div class="row-desc">Khuyên bật lần đầu để kiểm tra DOM & câu trả lời trước</div>
+          </div>
+          <input type="checkbox" id="draftOnly" />
+        </div>
+      </div>
+
+      <div class="card inline-fields">
+        <label class="field">
+          <span>Quét Tin nhắn (giây)</span>
+          <input type="number" id="messageScanIntervalSec" min="10" max="600" value="20" />
+        </label>
+        <label class="field">
+          <span>Quét Bình luận (giây)</span>
+          <input type="number" id="commentScanIntervalSec" min="15" max="1200" value="60" />
+        </label>
+        <label class="field">
+          <span>Số hội thoại quét</span>
+          <input type="number" id="messageScanCount" min="1" max="20" value="10" />
+        </label>
+        <label class="field">
+          <span>Số video quét</span>
+          <input type="number" id="commentVideoCount" min="1" max="15" value="5" />
+        </label>
+        <label class="field">
+          <span>Giới hạn gửi / phút</span>
+          <input type="number" id="maxRepliesPerMinute" min="1" max="40" value="15" />
+        </label>
+      </div>
+
+      <div class="actions">
+        <button class="btn primary" id="btnSaveControl">Lưu cài đặt</button>
+        <button class="btn secondary" id="btnScanNow">Quét ngay 1 vòng</button>
+      </div>
+
+      <div class="actions">
+        <button class="btn ghost" id="btnDiagnose">Kiểm tra DOM trang đang mở</button>
+      </div>
+
+      <pre class="diag-box hidden" id="diagOutput"></pre>
+    </section>
+
+    <!-- TAB 2: GEMINI AI -->
+    <section class="panel" id="tab-gemini">
+      <div class="card">
+        <label class="field">
+          <span>Gemini API Key (AI Studio)</span>
+          <input type="password" id="apiKey" placeholder="AIzaSy..." autocomplete="off" />
+        </label>
+
+        <label class="field">
+          <span>Model Gemini</span>
+          <select id="model">
+            <option value="gemini-3.8-flash">gemini-3.8-flash (Mặc định - Khuyên dùng)</option>
+            <option value="gemini-2.5-flash">gemini-2.5-flash (Ổn định)</option>
+            <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (Siêu nhanh, tiết kiệm)</option>
+            <option value="gemini-2.5-pro">gemini-2.5-pro (Tư vấn chuyên sâu)</option>
+            <option value="custom">Tự nhập tên model khác...</option>
+          </select>
+        </label>
+
+        <label class="field hidden" id="customModelWrap">
+          <span>Tên Model tùy chỉnh</span>
+          <input type="text" id="customModel" placeholder="vd: gemini-2.0-flash" />
+        </label>
+
+        <div class="actions">
+          <button class="btn secondary" id="btnTestApi">Test kết nối Gemini</button>
+          <button class="btn primary" id="btnSaveAi">Lưu cấu hình AI</button>
+        </div>
+        <div class="notice hidden" id="apiTestResult"></div>
+      </div>
+
+      <div class="card">
+        <label class="field">
+          <span>Kịch bản & Bảng giá trả lời Tin nhắn (System Prompt)</span>
+          <textarea id="messagePrompt" rows="5"></textarea>
+        </label>
+
+        <label class="field">
+          <span>Kịch bản trả lời Bình luận (System Prompt)</span>
+          <textarea id="commentPrompt" rows="4"></textarea>
+        </label>
+      </div>
+    </section>
+
+    <!-- TAB 3: NHẬT KÝ -->
+    <section class="panel" id="tab-logs">
+      <div class="actions">
+        <button class="btn ghost" id="btnClearLogs">Xóa nhật ký</button>
+        <button class="btn ghost" id="btnClearDedupe">Reset chống trùng</button>
+      </div>
+      <div class="logs-list" id="logsList">
+        <div class="empty">Chưa có lịch sử hoạt động.</div>
+      </div>
+    </section>
+
+    <div class="toast hidden" id="toast"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
