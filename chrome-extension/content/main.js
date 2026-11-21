@@ -14,6 +14,8 @@ window.TTAR = window.TTAR || {};
   let settings = null;
   let timerId = null;
   let isScanning = false;
+  let pendingImmediateRun = false;
+  let reloadingNow = false;
   let cycleCount = 0;
   let pausedOnDraft = false;
 
@@ -59,7 +61,7 @@ window.TTAR = window.TTAR || {};
       StatusOverlay.update('idle', 'TikTok AI: Đang tạm dừng');
       return;
     }
-    if (isScanning || pausedOnDraft) return;
+    if (isScanning || pendingImmediateRun || reloadingNow || pausedOnDraft) return;
 
     const now = Date.now();
     const msgIntervalMs = Math.max(10, Number(settings.messageScanIntervalSec) || 20) * 1000;
@@ -175,7 +177,7 @@ window.TTAR = window.TTAR || {};
       return;
     }
 
-    if (isScanning || pausedOnDraft) return;
+    if (isScanning || pendingImmediateRun || reloadingNow || pausedOnDraft) return;
 
     renderCountdownPill();
 
@@ -198,6 +200,11 @@ window.TTAR = window.TTAR || {};
     if (!msgDue && !cmtDue) return;
 
     if (settings.autoReloadBeforeScan) {
+      reloadingNow = true;
+      if (timerId) {
+        clearInterval(timerId);
+        timerId = null;
+      }
       StatusOverlay.update('busy', 'Đang F5 làm mới để bắt tin nhắn/bình luận mới...');
       sessionStorage.setItem(RELOAD_FLAG_KEY, JSON.stringify({ runMsg: msgDue, runCmt: cmtDue }));
       window.location.reload();
@@ -212,8 +219,10 @@ window.TTAR = window.TTAR || {};
       clearInterval(timerId);
       timerId = null;
     }
+    reloadingNow = false;
 
     if (!settings?.enabled) {
+      pendingImmediateRun = false;
       syncScheduleToBg({ activeLane: null });
       StatusOverlay.update('idle', 'TikTok AI: Đang tạm dừng');
       return;
@@ -230,11 +239,18 @@ window.TTAR = window.TTAR || {};
       syncScheduleToBg({ lastCmtScanAt: now });
     }
 
-    renderCountdownPill();
-
     if (runImmediately) {
+      // Khóa pendingImmediateRun trước khi bật ticker 1s để tuyệt đối KHÔNG bị F5 lặp lại trước khi quét!
+      pendingImmediateRun = true;
       const lanes = immediateLanes || { runMsg: true, runCmt: true };
-      setTimeout(() => runOneCycle({ manual: false, ...lanes }), 2000);
+      StatusOverlay.update('busy', 'Đã tải xong — chuẩn bị quét phiên mới...');
+      setTimeout(async () => {
+        pendingImmediateRun = false;
+        await runOneCycle({ manual: false, ...lanes });
+      }, 1500);
+    } else {
+      pendingImmediateRun = false;
+      renderCountdownPill();
     }
 
     // Cập nhật đồng hồ đếm ngược mỗi 1 giây
