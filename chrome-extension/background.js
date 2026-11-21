@@ -1,5 +1,7 @@
 // background.js - Service Worker: Gemini API client, Storage, Dedupe & Audit Logs
 
+const BUSINESS_SUITE_URL = 'https://www.tiktok.com/business-suite/messages?lang=en&from=homepage';
+
 const STORAGE_KEYS = {
   SETTINGS: 'tt_ar_settings',
   LOGS: 'tt_ar_logs',
@@ -451,6 +453,35 @@ chrome.runtime.onStartup.addListener(async () => {
   updateBadge(settings.enabled);
 });
 
+async function ensureBusinessSuiteTab() {
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+  // Nếu tab đang mở đã ở Business Suite rồi thì giữ nguyên
+  if (activeTab?.id && /tiktok\.com\/business-suite\//i.test(activeTab.url || '')) {
+    return { tabId: activeTab.id, navigated: false };
+  }
+
+  // Nếu đã có sẵn 1 tab Business Suite khác trong cùng cửa sổ -> chuyển sang tab đó
+  const existingBsTabs = await chrome.tabs.query({
+    currentWindow: true,
+    url: ['https://www.tiktok.com/business-suite/*', 'https://tiktok.com/business-suite/*']
+  });
+  if (existingBsTabs.length > 0 && existingBsTabs[0].id) {
+    await chrome.tabs.update(existingBsTabs[0].id, { active: true });
+    return { tabId: existingBsTabs[0].id, navigated: false };
+  }
+
+  // Nếu tab đang mở là trang chủ/trang khác của tiktok.com -> chuyển thẳng tab đó sang Business Suite
+  if (activeTab?.id && /tiktok\.com/i.test(activeTab.url || '')) {
+    await chrome.tabs.update(activeTab.id, { url: BUSINESS_SUITE_URL });
+    return { tabId: activeTab.id, navigated: true };
+  }
+
+  // Nếu không ở tiktok.com -> mở tab mới tới Business Suite
+  const created = await chrome.tabs.create({ url: BUSINESS_SUITE_URL, active: true });
+  return { tabId: created.id, navigated: true };
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   (async () => {
     try {
@@ -489,7 +520,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           break;
         }
         case 'SAVE_SETTINGS': {
+          const prev = await getSettings();
           const settings = await saveSettings(message.payload || {});
+          const justTurnedOn = !prev.enabled && Boolean(settings.enabled);
+
+          let navigated = false;
+          if (justTurnedOn && (settings.enableMessages || settings.enableBusinessComments)) {
+            const navRes = await ensureBusinessSuiteTab();
+            navigated = navRes.navigated;
+            if (navigated) {
+              // Đặt cờ để khi trang Business Suite vừa tải xong là chạy quét ngay
+              await chrome.storage.local.set({
+                [STORAGE_KEYS.SCHEDULE]: {
+                  lastMsgScanAt: 0,
+                  lastCmtScanAt: 0,
+                  activeLane: null,
+                  runOnNextLoad: true
+                }
+              });
+            }
+          }
+
           // Broadcast updated settings to all TikTok tabs
           const tabs = await chrome.tabs.query({ url: ['https://www.tiktok.com/*', 'https://tiktok.com/*'] });
           for (const tab of tabs) {
@@ -497,7 +548,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
               chrome.tabs.sendMessage(tab.id, { action: 'SETTINGS_UPDATED', settings }).catch(() => {});
             }
           }
-          sendResponse({ ok: true, settings });
+          sendResponse({ ok: true, settings, navigated });
+          break;
+        }
+        case 'ENSURE_BUSINESS_SUITE_TAB': {
+          const navRes = await ensureBusinessSuiteTab();
+          if (navRes.navigated) {
+            await chrome.storage.local.set({
+              [STORAGE_KEYS.SCHEDULE]: {
+                lastMsgScanAt: 0,
+                lastCmtScanAt: 0,
+                activeLane: null,
+                runOnNextLoad: true
+              }
+            });
+          }
+          sendResponse({ ok: true, ...navRes });
           break;
         }
         case 'TEST_GEMINI_API': {

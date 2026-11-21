@@ -141,7 +141,7 @@ window.TTAR = window.TTAR || {};
       if (!text || text.length > 1500) return false;
       if (text.length < 2 && !/[a-zA-ZÀ-ỹ0-9]/.test(text)) return false;
       if (
-        /^\d{1,2}\s*Tháng|^\d{1,2}:\d{2}$|^\d{1,2}\/\d{1,2}\/\d{4}|tin nhắn này được gửi|từ quảng cáo|yêu cầu trò chuyện đã được chấp nhận/i.test(
+        /^\d{1,2}\s*Tháng|^\d{1,2}:\d{2}(\s*[AP]M)?$|^\d{1,2}\/\d{1,2}\/\d{4}|tin nhắn này được gửi|từ quảng cáo|yêu cầu trò chuyện đã được chấp nhận|message request accepted|this message was sent|from an ad/i.test(
           text
         )
       ) {
@@ -530,7 +530,7 @@ window.TTAR = window.TTAR || {};
       await waitFor(
         () =>
           ns.adaptive.findCommentReplyButtons(videoDoc).length > 0 ||
-          /0 bình luận|hãy là người đầu tiên/i.test(videoDoc.body?.innerText || ''),
+          /0 bình luận|0 comments|hãy là người đầu tiên|be the first to comment/i.test(videoDoc.body?.innerText || ''),
         4500
       );
 

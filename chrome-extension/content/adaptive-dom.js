@@ -287,9 +287,10 @@ window.TTAR = window.TTAR || {};
       }
     }
 
-    // Tầng 2: Neo theo chuỗi trạng thái bình luận ("Không có bình luận mới nào", "bình luận mới", "5 giờ")
+    // Tầng 2: Neo theo chuỗi trạng thái bình luận (Việt + Anh: "Không có bình luận mới nào", "No new comments", "5 giờ", "5h")
     const maxLeft = window.innerWidth * 0.52;
-    const statusRegex = /^(không có bình luận mới nào|\d+\s*bình luận mới|\d+\s*(phút|giờ|ngày)|\d{1,2}\/\d{1,2}\/\d{4})$/i;
+    const statusRegex =
+      /^(không có bình luận mới nào|no new comments?|\d+\s*bình luận mới|\d+\s*new comments?|\d+\s*(phút|giờ|ngày|min|mins|hr|hrs|hour|hours|day|days|m|h|d)|\d{1,2}\/\d{1,2}\/\d{4})$/i;
     const anchors = Array.from(document.querySelectorAll('span, p, div')).filter((el) => {
       if (!isVisible(el) || el.children.length > 1) return false;
       const r = el.getBoundingClientRect();

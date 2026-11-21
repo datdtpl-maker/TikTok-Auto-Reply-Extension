@@ -264,6 +264,11 @@ $('btnTestApi').addEventListener('click', async () => {
 
 $('btnScanNow').addEventListener('click', async () => {
   await saveAll(true);
+  const nav = await sendBg({ action: 'ENSURE_BUSINESS_SUITE_TAB' });
+  if (nav?.navigated) {
+    showToast('Đang chuyển sang Business Suite & tự động quét...');
+    return;
+  }
   showToast('Đang chạy 1 vòng quét...');
   const res = await sendActiveTab({ action: 'RUN_SCAN_NOW' });
   if (res?.ok) {

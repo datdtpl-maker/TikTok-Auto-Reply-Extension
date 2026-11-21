@@ -314,8 +314,22 @@ window.TTAR = window.TTAR || {};
         reloadLanes = { runMsg: true, runCmt: true };
       }
     }
-    await sleep(reloadLanes ? 2600 : 1200);
-    await loadSettings();
+    await sleep(reloadLanes ? 2600 : 1500);
+    const stateRes = await sendRuntimeMessage({ action: 'GET_STATE' });
+    if (stateRes?.ok && stateRes.settings) {
+      settings = stateRes.settings;
+      if (stateRes.schedule) {
+        const bestMsgTs = Math.max(getLastTs(LAST_MSG_KEY), Number(stateRes.schedule.lastMsgScanAt) || 0);
+        const bestCmtTs = Math.max(getLastTs(LAST_CMT_KEY), Number(stateRes.schedule.lastCmtScanAt) || 0);
+        if (bestMsgTs) setLastTs(LAST_MSG_KEY, bestMsgTs);
+        if (bestCmtTs) setLastTs(LAST_CMT_KEY, bestCmtTs);
+
+        if (stateRes.schedule.runOnNextLoad && bs.isBusinessSuitePage()) {
+          await syncScheduleToBg({ runOnNextLoad: false });
+          reloadLanes = reloadLanes || { runMsg: true, runCmt: true };
+        }
+      }
+    }
     restartScheduler(Boolean(reloadLanes), reloadLanes);
   })();
 })(window.TTAR);
