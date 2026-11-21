@@ -230,14 +230,48 @@ async function callGeminiApi({ apiKey, model, systemInstruction, userContent, te
 const VIETNAMESE_STRICT_RULE =
   'QUY TẮC NGÔN NGỮ BẮT BUỘC (KHÔNG ĐƯỢC VI PHẠM): ' +
   '100% câu trả lời PHẢI viết bằng tiếng Việt có dấu tự nhiên. ' +
-  'TUYỆT ĐỐI KHÔNG trả lời bằng tiếng Anh, tiếng Trung, tiếng Hàn, tiếng Nhật hay bất kỳ ngôn ngữ nào khác, ' +
-  'kể cả khi khách nhắn/bình luận bằng ngôn ngữ khác hoặc tên tài khoản là tiếng nước ngoài.';
+  'TUYỆT ĐỐI KHÔNG trả lời bằng tiếng Anh, tiếng Trung, tiếng Hàn, tiếng Nhật hay bất kỳ ngôn ngữ nào khác.';
 
-function buildSystemInstruction(settings, type) {
+const ENGLISH_STRICT_RULE =
+  'STRICT LANGUAGE RULE (MANDATORY): ' +
+  'The customer is writing in English. You MUST reply 100% in natural, polite, friendly English (concise 2-3 sentences for messages, 1-2 sentences for comments, no markdown). ' +
+  'Translate any matching service names/prices from the internal spa knowledge base accurately into English without inventing prices.';
+
+function isCustomerEnglish(text) {
+  const str = String(text || '').trim();
+  if (!str) return false;
+  // Có dấu tiếng Việt => chắc chắn là tiếng Việt
+  if (/[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(str)) {
+    return false;
+  }
+  // Có từ khóa tiếng Việt không dấu phổ biến => tiếng Việt
+  if (
+    /\b(xin gia|gia sao|bao nhieu|shop oi|ben minh|tu van|triet|nan mun|tham nach|da mun|cam on|khong|duoc khong|o dau|dia chi|lieu trinh|buoi le)\b/i.test(
+      str
+    )
+  ) {
+    return false;
+  }
+  // Có cấu trúc / từ vựng tiếng Anh rõ ràng
+  const englishMatches = str.match(
+    /\b(hi|hello|hey|can you|could you|how much|what is|what are|where|price|cost|service|services|product|products|treatment|treatments|skin|skincare|acne|please|thank|thanks|tell me|more about|book|appointment|open|hours|address|location|available|do you|i have|i want|interested|help)\b/gi
+  );
+  return Boolean(englishMatches && englishMatches.length >= 2);
+}
+
+function detectTargetLanguage(payload) {
+  if (isCustomerEnglish(payload?.latestText)) {
+    return 'en';
+  }
+  return 'vi';
+}
+
+function buildSystemInstruction(settings, type, targetLang = 'vi') {
   const basePrompt = type === 'message' ? settings.messagePrompt : settings.commentPrompt;
   const kb = String(settings.knowledgeBase || '').trim();
+  const langRule = targetLang === 'en' ? ENGLISH_STRICT_RULE : VIETNAMESE_STRICT_RULE;
 
-  const sections = [VIETNAMESE_STRICT_RULE, basePrompt];
+  const sections = [langRule, basePrompt];
 
   if (kb) {
     sections.push(
@@ -318,7 +352,8 @@ async function handleGenerateReply(payload) {
       ? settings.customModel.trim()
       : settings.model || 'gemini-3.8-flash';
 
-  const systemInstruction = buildSystemInstruction(settings, payload.type);
+  const targetLang = detectTargetLanguage(payload);
+  const systemInstruction = buildSystemInstruction(settings, payload.type, targetLang);
   const userContent = buildUserPrompt(payload);
 
   try {
@@ -330,8 +365,10 @@ async function handleGenerateReply(payload) {
       temperature: settings.temperature
     });
 
-    // Lớp bảo vệ tầng 2: nếu phát hiện model lỡ trả lời bằng ngôn ngữ khác -> ép viết lại 100% tiếng Việt có dấu
-    if (isLikelyNonVietnamese(replyText)) {
+    // Lớp bảo vệ tầng 2:
+    // - Nếu khách nhắn tiếng Việt (hoặc ngôn ngữ khác không phải tiếng Anh) -> ép 100% tiếng Việt có dấu
+    // - Nếu khách nhắn tiếng Anh -> cho phép trả lời tiếng Anh tự nhiên (chỉ chặn ký tự CJK/Thái/Nga)
+    if (targetLang === 'vi' && isLikelyNonVietnamese(replyText)) {
       replyText = await callGeminiApi({
         apiKey: settings.apiKey,
         model: activeModel,
@@ -339,6 +376,20 @@ async function handleGenerateReply(payload) {
           VIETNAMESE_STRICT_RULE +
           ' Giữ nguyên thông tin giá/dịch vụ, không dùng markdown, chỉ xuất đúng câu trả lời tiếng Việt.',
         userContent: `Hãy chuyển toàn bộ câu trả lời sau sang tiếng Việt có dấu tự nhiên, lịch sự theo phong cách CSKH spa:\n"${replyText}"`,
+        temperature: 0.2
+      });
+    } else if (
+      targetLang === 'en' &&
+      /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/i.test(
+        replyText
+      )
+    ) {
+      replyText = await callGeminiApi({
+        apiKey: settings.apiKey,
+        model: activeModel,
+        systemInstruction:
+          ENGLISH_STRICT_RULE + ' Keep exact service/price details, no markdown, output only the reply.',
+        userContent: `Rewrite this spa customer reply cleanly in natural polite English:\n"${replyText}"`,
         temperature: 0.2
       });
     }
