@@ -173,15 +173,72 @@ window.TTAR = window.TTAR || {};
     return bestGroup;
   }
 
+  function isMessageRequestsRow(el) {
+    const txt = normalizeText(el?.innerText || '');
+    return /^(message requests|yêu cầu tin nhắn)\b/i.test(txt) || /\b(you have \d+ requests?|bạn có \d+ yêu cầu)\b/i.test(txt);
+  }
+
   /**
-   * Tìm danh sách hội thoại Tin nhắn theo 4 tầng thích ứng.
+   * Tìm dòng mục "Message requests" / "Yêu cầu tin nhắn" trong danh sách Tin nhắn.
    */
-  function findConversationRows(msgDoc, limit = 10) {
-    if (!msgDoc) return [];
+  function findMessageRequestsEntry(msgDoc) {
+    if (!msgDoc) return null;
     const listRoot = msgDoc.querySelector('[data-e2e="dm-new-conversation-list"]') || msgDoc;
 
+    // Tìm thẻ text chứa đúng "Message requests" hoặc "Yêu cầu tin nhắn"
+    const labelNode = Array.from(listRoot.querySelectorAll('p, span, div')).find((el) => {
+      if (!isVisible(el) || el.children.length > 1) return false;
+      return /^(message requests|yêu cầu tin nhắn)$/i.test(normalizeText(el.innerText));
+    });
+    if (!labelNode) return null;
+
+    // Leo lên đúng thẻ dòng clickable của mục Message requests
+    let cur = labelNode.parentElement;
+    for (let d = 0; d < 7 && cur && cur !== listRoot; d++) {
+      const r = cur.getBoundingClientRect();
+      if (r.width >= 160 && r.width <= 540 && r.height >= 44 && r.height <= 135) {
+        return cur;
+      }
+      cur = cur.parentElement;
+    }
+    return labelNode.parentElement || labelNode;
+  }
+
+  /**
+   * Tìm nút quay lại (<) ở tiêu đề "< Message requests" / "< Yêu cầu tin nhắn".
+   */
+  function findMessageRequestsBackButton(msgDoc) {
+    if (!msgDoc) return null;
+    const headerLabel = Array.from(msgDoc.querySelectorAll('h1, h2, h3, p, span, div')).find((el) => {
+      if (!isVisible(el) || el.children.length > 2) return false;
+      const r = el.getBoundingClientRect();
+      return r.top < 160 && /^(message requests|yêu cầu tin nhắn)$/i.test(normalizeText(el.innerText));
+    });
+    if (!headerLabel) return null;
+
+    let row = headerLabel.parentElement;
+    for (let d = 0; d < 4 && row && row !== msgDoc.body; d++) {
+      const btn = Array.from(row.querySelectorAll('button, [role="button"], svg')).find((el) => {
+        if (!isVisible(el)) return false;
+        const r = el.getBoundingClientRect();
+        return r.left <= headerLabel.getBoundingClientRect().left + 10 && r.width <= 48 && r.height <= 48;
+      });
+      if (btn) return btn.closest('button, [role="button"]') || btn;
+      row = row.parentElement;
+    }
+    return null;
+  }
+
+  /**
+   * Tìm danh sách hội thoại Tin nhắn theo 4 tầng thích ứng (tự lọc bỏ dòng thư mục Message requests).
+   */
+  function findConversationRows(msgDoc, limit = 10, { includeRequestsFolder = false } = {}) {
+    if (!msgDoc) return [];
+    const listRoot = msgDoc.querySelector('[data-e2e="dm-new-conversation-list"]') || msgDoc;
+    const filterRow = (el) => isVisible(el) && (includeRequestsFolder || !isMessageRequestsRow(el));
+
     // Tầng 1: data-e2e chuẩn
-    let rows = Array.from(listRoot.querySelectorAll('[data-e2e="chat-list-item"]')).filter(isVisible);
+    let rows = Array.from(listRoot.querySelectorAll('[data-e2e="chat-list-item"]')).filter(filterRow);
     if (rows.length > 0) {
       rows.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
       recordStrategy('conversationList', 'L1:data-e2e', rows.length);
@@ -190,7 +247,7 @@ window.TTAR = window.TTAR || {};
 
     // Tầng 2: role="listitem" hoặc aria-label hội thoại
     rows = Array.from(listRoot.querySelectorAll('[role="listitem"], li')).filter((el) => {
-      if (!isVisible(el)) return false;
+      if (!filterRow(el)) return false;
       const r = el.getBoundingClientRect();
       return r.width >= 160 && r.width <= 520 && r.height >= 44 && r.height <= 135 && normalizeText(el.innerText).length >= 3;
     });
@@ -200,7 +257,7 @@ window.TTAR = window.TTAR || {};
       return rows.slice(0, limit);
     }
 
-    // Tầng 3: Neo theo chuỗi thời gian (11:43, 19/11/2026, 5 phút...)
+    // Tầng 3: Neo theo chuỗi thời gian (11:43, 19/11/2026, 9/21/2026, 5 phút...)
     const timeRegex = /^(\d{1,2}:\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{1,2}-\d{1,2}|\d+\s*(phút|giờ|ngày|m|h|d))$/i;
     const anchors = Array.from(listRoot.querySelectorAll('span, p, div, time')).filter((el) => {
       if (!isVisible(el) || el.children.length > 1) return false;
@@ -212,7 +269,7 @@ window.TTAR = window.TTAR || {};
       let cur = node.parentElement;
       for (let d = 0; d < 7 && cur && cur !== listRoot; d++) {
         const r = cur.getBoundingClientRect();
-        if (r.width >= 170 && r.width <= 520 && r.height >= 46 && r.height <= 135) {
+        if (r.width >= 170 && r.width <= 520 && r.height >= 46 && r.height <= 135 && filterRow(cur)) {
           if (!seen.has(cur)) {
             seen.add(cur);
             anchored.push(cur);
@@ -230,7 +287,7 @@ window.TTAR = window.TTAR || {};
     }
 
     // Tầng 4: Hình học danh sách dọc lặp lại
-    const geoRows = findRepeatedVerticalRows(msgDoc, { maxLeftRatio: 0.52, minTop: 60 });
+    const geoRows = findRepeatedVerticalRows(msgDoc, { maxLeftRatio: 0.52, minTop: 60 }).filter(filterRow);
     recordStrategy('conversationList', geoRows.length ? 'L4:geometry' : 'none', geoRows.length);
     return geoRows.slice(0, limit);
   }
@@ -396,6 +453,8 @@ window.TTAR = window.TTAR || {};
   ns.adaptive = {
     resolveMessagesDoc,
     resolveVideoDoc,
+    findMessageRequestsEntry,
+    findMessageRequestsBackButton,
     findConversationRows,
     findChatbox,
     findCommentVideoRows,

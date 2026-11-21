@@ -71,6 +71,14 @@
 
         <div class="row-toggle">
           <div>
+            <div class="row-title">Phần 1B: Yêu cầu tin nhắn (Message requests)</div>
+            <div class="row-desc">Tự vào mục Message requests / Yêu cầu tin nhắn & trả lời</div>
+          </div>
+          <input type="checkbox" id="enableMessageRequests" />
+        </div>
+
+        <div class="row-toggle">
+          <div>
             <div class="row-title">Phần 2A: Tab Bình luận (Business Suite)</div>
             <div class="row-desc">Chuyển tab Bình luận ngay trong trang Business Suite</div>
           </div>
@@ -114,6 +122,10 @@
         <label class="field">
           <span>Số hội thoại quét</span>
           <input type="number" id="messageScanCount" min="1" max="20" value="10" />
+        </label>
+        <label class="field">
+          <span>Số Yêu cầu tin nhắn quét</span>
+          <input type="number" id="messageRequestScanCount" min="1" max="20" value="5" />
         </label>
         <label class="field">
           <span>Số video quét</span>

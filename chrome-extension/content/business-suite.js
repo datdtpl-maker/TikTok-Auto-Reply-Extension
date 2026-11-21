@@ -21,6 +21,7 @@ window.TTAR = window.TTAR || {};
   } = ns.dom;
 
   const DEFAULT_CONVERSATIONS_COUNT = 10;
+  const DEFAULT_REQUEST_CONVERSATIONS_COUNT = 5;
   const DEFAULT_VIDEOS_COUNT = 5;
 
   function isBusinessSuitePage() {
@@ -200,27 +201,30 @@ window.TTAR = window.TTAR || {};
     };
   }
 
-  async function scanBusinessMessages(settings) {
-    if (!isBusinessSuitePage()) return { scanned: 0, replied: 0, stoppedForDraft: false };
-
-    const targetCount = Math.max(1, Math.min(20, Number(settings.messageScanCount) || DEFAULT_CONVERSATIONS_COUNT));
-    const switched = await switchBusinessTab('messages');
-    if (!switched) {
-      StatusOverlay.update('error', 'Không tìm thấy tab Tin nhắn');
-      return { scanned: 0, replied: 0, stoppedForDraft: false };
+  async function acceptMessageRequestIfNeeded(box) {
+    if (!box) return false;
+    const acceptBtn = Array.from(box.querySelectorAll('button, [role="button"]')).find((el) => {
+      if (!isVisible(el)) return false;
+      return /^(accept|chấp nhận)$/i.test(normalizeText(el.innerText));
+    });
+    if (acceptBtn) {
+      flashHighlight(acceptBtn, '#10b981');
+      humanClick(acceptBtn);
+      await sleep(900);
+      return true;
     }
+    return false;
+  }
 
-    // Chờ iframe /messages và danh sách hội thoại render xong
+  async function processConversationBatch(targetCount, settings, { labelPrefix = 'Tin nhắn', source = 'business_suite_message', isRequest = false } = {}) {
     const ready = await waitFor(() => {
       const doc = getMessagesDoc();
       if (!doc) return null;
       const rows = getConversationRows(doc, targetCount);
       return rows.length > 0 ? { doc, count: rows.length } : null;
-    }, 8000);
+    }, 6000);
 
     if (!ready) {
-      StatusOverlay.update('error', 'Tin nhắn: Không tải được iframe danh sách hội thoại');
-      await logStep('message', 'System', 'Quét tab Tin nhắn', '', 'Không tìm thấy dòng hội thoại trong iframe /messages', 'error');
       return { scanned: 0, replied: 0, stoppedForDraft: false };
     }
 
@@ -237,12 +241,11 @@ window.TTAR = window.TTAR || {};
       scanned++;
       const expectedName = normalizeText((row.innerText || '').split('\n')[0] || '');
       const prevHeaderName = extractChatMessagesFromDoc(msgDoc).customerName;
-      StatusOverlay.update('busy', `Tin nhắn ${i + 1}/${ready.count}: Mở ${(expectedName || `#${i + 1}`).slice(0, 22)}...`);
+      StatusOverlay.update('busy', `${labelPrefix} ${i + 1}/${ready.count}: Mở ${(expectedName || `#${i + 1}`).slice(0, 22)}...`);
 
       flashHighlight(row, '#38bdf8');
       humanClick(row);
 
-      // Chờ khung chat thực sự chuyển sang đúng khách hàng vừa bấm (tránh đọc nhầm khách trước đó!)
       await waitFor(() => {
         const cur = extractChatMessagesFromDoc(msgDoc);
         if (!cur.customerName) return false;
@@ -259,7 +262,7 @@ window.TTAR = window.TTAR || {};
 
       const { customerName, sharedVideoContext, messages } = extractChatMessagesFromDoc(msgDoc);
       if (messages.length === 0) {
-        await logStep('message', customerName, 'Không đọc được tin nhắn trong khung chat');
+        await logStep('message', customerName, `${labelPrefix}: Không đọc được tin nhắn trong khung chat`);
         continue;
       }
 
@@ -269,7 +272,6 @@ window.TTAR = window.TTAR || {};
         continue;
       }
 
-      // Gom các tin nhắn liên tiếp cuối cùng của khách
       const trailingCustomerMsgs = [];
       for (let j = messages.length - 1; j >= 0; j--) {
         if (messages[j].sender === 'customer') {
@@ -287,12 +289,12 @@ window.TTAR = window.TTAR || {};
         continue;
       }
 
-      StatusOverlay.update('busy', `Gemini đang trả lời tin nhắn ${customerName}...`);
+      StatusOverlay.update('busy', `Gemini đang trả lời ${labelPrefix.toLowerCase()} ${customerName}...`);
       const aiRes = await sendRuntimeMessage({
         action: 'GENERATE_REPLY',
         payload: {
           type: 'message',
-          source: 'business_suite_message',
+          source,
           fingerprint,
           customerName,
           sharedVideoContext,
@@ -309,6 +311,10 @@ window.TTAR = window.TTAR || {};
       }
 
       const box = ns.adaptive.findChatbox(msgDoc, rows) || msgDoc;
+      if (isRequest) {
+        await acceptMessageRequestIfNeeded(box);
+      }
+
       const inputEl = await waitFor(
         () => findEditableInput(box, [/gửi tin nhắn|send a message/i]),
         4500
@@ -353,7 +359,7 @@ window.TTAR = window.TTAR || {};
         'running',
         settings.draftOnly
           ? `Đã điền nháp cho ${customerName} (giữ màn hình)`
-          : `Đã trả lời tin nhắn ${customerName}`
+          : `Đã trả lời ${labelPrefix.toLowerCase()} ${customerName}`
       );
 
       if (settings.draftOnly) {
@@ -364,6 +370,81 @@ window.TTAR = window.TTAR || {};
     }
 
     return { scanned, replied, stoppedForDraft: false };
+  }
+
+  async function scanBusinessMessages(settings) {
+    if (!isBusinessSuitePage()) return { scanned: 0, replied: 0, stoppedForDraft: false };
+
+    const targetCount = Math.max(1, Math.min(20, Number(settings.messageScanCount) || DEFAULT_CONVERSATIONS_COUNT));
+    const switched = await switchBusinessTab('messages');
+    if (!switched) {
+      StatusOverlay.update('error', 'Không tìm thấy tab Tin nhắn');
+      return { scanned: 0, replied: 0, stoppedForDraft: false };
+    }
+
+    // Chờ iframe /messages sẵn sàng
+    const msgDocReady = await waitFor(() => getMessagesDoc(), 8000);
+    if (!msgDocReady) {
+      StatusOverlay.update('error', 'Tin nhắn: Không tải được iframe danh sách hội thoại');
+      await logStep('message', 'System', 'Quét tab Tin nhắn', '', 'Không tìm thấy iframe /messages', 'error');
+      return { scanned: 0, replied: 0, stoppedForDraft: false };
+    }
+
+    // Nếu đang kẹt bên trong mục Message requests từ phiên trước -> quay lại danh sách chính
+    const existingBack = ns.adaptive.findMessageRequestsBackButton(msgDocReady);
+    if (existingBack) {
+      humanClick(existingBack);
+      await sleep(900);
+    }
+
+    // 1. Quét các cuộc hội thoại Tin nhắn chính
+    const mainRes = await processConversationBatch(targetCount, settings, {
+      labelPrefix: 'Tin nhắn',
+      source: 'business_suite_message',
+      isRequest: false
+    });
+
+    if (mainRes.stoppedForDraft) {
+      return mainRes;
+    }
+
+    // 2. Quét mục "Message requests" / "Yêu cầu tin nhắn" (tài khoản cá nhân nhắn tới)
+    let reqRes = { scanned: 0, replied: 0, stoppedForDraft: false };
+    if (settings.enableMessageRequests !== false) {
+      const liveDoc = getMessagesDoc();
+      const reqEntry = ns.adaptive.findMessageRequestsEntry(liveDoc);
+      if (reqEntry) {
+        const reqLimit = Math.max(
+          1,
+          Math.min(20, Number(settings.messageRequestScanCount) || DEFAULT_REQUEST_CONVERSATIONS_COUNT)
+        );
+        StatusOverlay.update('busy', `Mở Yêu cầu tin nhắn (quét tối đa ${reqLimit} hội thoại)...`);
+        flashHighlight(reqEntry, '#f59e0b');
+        humanClick(reqEntry);
+        await sleep(1200);
+
+        reqRes = await processConversationBatch(reqLimit, settings, {
+          labelPrefix: 'Yêu cầu TN',
+          source: 'business_suite_message_request',
+          isRequest: true
+        });
+
+        // Quay lại danh sách Tin nhắn chính nếu không dừng ở nháp
+        if (!reqRes.stoppedForDraft) {
+          const backBtn = ns.adaptive.findMessageRequestsBackButton(getMessagesDoc());
+          if (backBtn) {
+            humanClick(backBtn);
+            await sleep(800);
+          }
+        }
+      }
+    }
+
+    return {
+      scanned: mainRes.scanned + reqRes.scanned,
+      replied: mainRes.replied + reqRes.replied,
+      stoppedForDraft: mainRes.stoppedForDraft || reqRes.stoppedForDraft
+    };
   }
 
   // ==================== PHẦN 2: TAB BÌNH LUẬN — TỰ THÍCH ỨNG 4 TẦNG ====================
@@ -690,6 +771,7 @@ window.TTAR = window.TTAR || {};
       page: 'business_suite',
       url: window.location.pathname,
       messagesIframeReady: Boolean(msgDoc),
+      messageRequestsFolderFound: Boolean(ns.adaptive.findMessageRequestsEntry(msgDoc)),
       conversationsFound: convRows.length,
       conversationsPreview: convRows.map((r) => normalizeText(r.innerText).slice(0, 40)),
       activeChatCustomer: chatData.customerName,

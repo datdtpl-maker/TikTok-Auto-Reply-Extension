@@ -77,6 +77,7 @@ function collectFormSettings() {
   return {
     enabled: $('toggleEnabled').checked,
     enableMessages: $('enableMessages').checked,
+    enableMessageRequests: $('enableMessageRequests').checked,
     enableBusinessComments: $('enableBusinessComments').checked,
     enableActivityComments: $('enableActivityComments').checked,
     autoReloadBeforeScan: $('autoReloadBeforeScan').checked,
@@ -84,6 +85,7 @@ function collectFormSettings() {
     messageScanIntervalSec: Math.max(10, Number($('messageScanIntervalSec').value) || 20),
     commentScanIntervalSec: Math.max(15, Number($('commentScanIntervalSec').value) || 60),
     messageScanCount: Math.max(1, Math.min(20, Number($('messageScanCount').value) || 10)),
+    messageRequestScanCount: Math.max(1, Math.min(20, Number($('messageRequestScanCount').value) || 5)),
     commentVideoCount: Math.max(1, Math.min(15, Number($('commentVideoCount').value) || 5)),
     maxRepliesPerMinute: Math.max(1, Number($('maxRepliesPerMinute').value) || 15),
     apiKey: $('apiKey').value.trim(),
@@ -169,6 +171,7 @@ async function loadState() {
   $('statusDot').classList.toggle('on', Boolean(settings.enabled));
 
   $('enableMessages').checked = Boolean(settings.enableMessages);
+  $('enableMessageRequests').checked = settings.enableMessageRequests !== false;
   $('enableBusinessComments').checked = Boolean(settings.enableBusinessComments);
   $('enableActivityComments').checked = Boolean(settings.enableActivityComments);
   $('autoReloadBeforeScan').checked = settings.autoReloadBeforeScan !== false;
@@ -176,6 +179,7 @@ async function loadState() {
   $('messageScanIntervalSec').value = settings.messageScanIntervalSec || 20;
   $('commentScanIntervalSec').value = settings.commentScanIntervalSec || 60;
   $('messageScanCount').value = settings.messageScanCount || 10;
+  $('messageRequestScanCount').value = settings.messageRequestScanCount || 5;
   $('commentVideoCount').value = settings.commentVideoCount || 5;
   $('maxRepliesPerMinute').value = settings.maxRepliesPerMinute || 15;
 

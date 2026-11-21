@@ -9,6 +9,7 @@ Tiện ích mở rộng Google Chrome (Manifest V3) giúp tự động quét, ph
 ### 1. Tự động quét & trả lời Tin nhắn (`tiktok.com/business-suite/messages`)
 - **Tương thích kiến trúc cross-iframe của TikTok Business Suite:** Truy cập trực tiếp `iframe[src*="/messages"]` (`[data-e2e="dm-new-conversation-list"]` và `[data-e2e="dm-new-chatbox"]`).
 - **Quét các cuộc hội thoại gần nhất:** Mặc định kiểm tra **10 cuộc hội thoại gần nhất** (tùy chỉnh được từ 1–20 trong Popup), chờ xác nhận khung chat đổi đúng tên khách hàng rồi mới đọc nội dung để tránh nhầm hội thoại.
+- **Tự động xử lý Yêu cầu tin nhắn (`Message requests` / `Yêu cầu tin nhắn`):** Khi tài khoản cá nhân nhắn tin bị đẩy vào mục `Message requests` / `Yêu cầu tin nhắn`, extension tự mở vào mục này, quét theo số lượng hội thoại cài đặt trong Popup, tự bấm **Accept / Chấp nhận** (nếu TikTok yêu cầu), trả lời khách và quay lại danh sách Tin nhắn chính.
 - **Phân biệt tin khách và tin của kênh:** Tự xác định vị trí bong bóng tin nhắn (bên trái là khách, bên phải là kênh). Chỉ khi **tin nhắn cuối cùng là của khách** (kênh chưa phản hồi) thì AI mới soạn và gửi trả lời.
 - **Bám sát ngữ cảnh đầy đủ:** Gom toàn bộ tin nhắn liên tiếp cuối cùng của khách, kèm **12 tin nhắn lịch sử gần nhất** và **nội dung video/bài viết khách chia sẻ kèm** trong cuộc trò chuyện.
 - **Điền và gửi chuẩn DOM Chrome:** Sử dụng sự kiện `paste` tương thích Draft.js/Lexical để cập nhật đúng trạng thái nhập liệu, tự bấm nút gửi máy bay giấy đỏ (`✈️`) và xác nhận ô nhập đã gửi thành công trước khi đánh dấu đã xử lý.

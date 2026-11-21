@@ -1,6 +1,6 @@
 // background.js - Service Worker: Gemini API client, Storage, Dedupe & Audit Logs
 
-const BUSINESS_SUITE_URL = 'https://www.tiktok.com/business-suite/messages?lang=en&from=homepage';
+const BUSINESS_SUITE_URL = 'https://www.tiktok.com/business-suite/messages';
 
 const STORAGE_KEYS = {
   SETTINGS: 'tt_ar_settings',
@@ -13,6 +13,7 @@ const STORAGE_KEYS = {
 const DEFAULT_SETTINGS = {
   enabled: false,
   enableMessages: true,
+  enableMessageRequests: true,
   enableBusinessComments: true,
   enableActivityComments: true,
   autoReloadBeforeScan: true,
@@ -21,6 +22,7 @@ const DEFAULT_SETTINGS = {
   messageScanIntervalSec: 20,
   commentScanIntervalSec: 60,
   messageScanCount: 10,
+  messageRequestScanCount: 5,
   commentVideoCount: 5,
   maxRepliesPerMinute: 15,
   apiKey: '',
