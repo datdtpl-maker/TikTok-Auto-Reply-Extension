@@ -458,28 +458,27 @@ chrome.runtime.onStartup.addListener(async () => {
 async function ensureBusinessSuiteTab() {
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-  // Nếu tab đang mở đã ở Business Suite rồi thì giữ nguyên
-  if (activeTab?.id && /tiktok\.com\/business-suite\//i.test(activeTab.url || '')) {
+  // Nếu tab đang mở ĐÃ ở đúng /business-suite/messages rồi thì giữ nguyên
+  if (activeTab?.id && /tiktok\.com\/business-suite\/messages\b/i.test(activeTab.url || '')) {
     return { tabId: activeTab.id, navigated: false };
   }
 
-  // Nếu đã có sẵn 1 tab Business Suite khác trong cùng cửa sổ -> chuyển sang tab đó
+  // Nếu tab đang mở là BẤT KỲ trang nào khác của tiktok.com (trang chủ, hồ sơ, video, comments...) -> chuyển thẳng tab này sang URL mặc định
+  if (activeTab?.id && /tiktok\.com/i.test(activeTab.url || '')) {
+    await chrome.tabs.update(activeTab.id, { url: BUSINESS_SUITE_URL });
+    return { tabId: activeTab.id, navigated: true };
+  }
+
+  // Nếu tab đang mở không phải TikTok -> ưu tiên chuyển sang tab /business-suite/messages có sẵn, không có thì mở tab mới
   const existingBsTabs = await chrome.tabs.query({
     currentWindow: true,
-    url: ['https://www.tiktok.com/business-suite/*', 'https://tiktok.com/business-suite/*']
+    url: ['https://www.tiktok.com/business-suite/messages*', 'https://tiktok.com/business-suite/messages*']
   });
   if (existingBsTabs.length > 0 && existingBsTabs[0].id) {
     await chrome.tabs.update(existingBsTabs[0].id, { active: true });
     return { tabId: existingBsTabs[0].id, navigated: false };
   }
 
-  // Nếu tab đang mở là trang chủ/trang khác của tiktok.com -> chuyển thẳng tab đó sang Business Suite
-  if (activeTab?.id && /tiktok\.com/i.test(activeTab.url || '')) {
-    await chrome.tabs.update(activeTab.id, { url: BUSINESS_SUITE_URL });
-    return { tabId: activeTab.id, navigated: true };
-  }
-
-  // Nếu không ở tiktok.com -> mở tab mới tới Business Suite
   const created = await chrome.tabs.create({ url: BUSINESS_SUITE_URL, active: true });
   return { tabId: created.id, navigated: true };
 }
@@ -524,14 +523,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         case 'SAVE_SETTINGS': {
           const prev = await getSettings();
           const settings = await saveSettings(message.payload || {});
-          const justTurnedOn = !prev.enabled && Boolean(settings.enabled);
+          const isEnabledNow = Boolean(settings.enabled);
+          const justTurnedOn = !prev.enabled && isEnabledNow;
 
           let navigated = false;
-          if (justTurnedOn && (settings.enableMessages || settings.enableBusinessComments)) {
+          if (isEnabledNow && (justTurnedOn || message.forceNavigate)) {
             const navRes = await ensureBusinessSuiteTab();
             navigated = navRes.navigated;
             if (navigated) {
-              // Đặt cờ để khi trang Business Suite vừa tải xong là chạy quét ngay
               await chrome.storage.local.set({
                 [STORAGE_KEYS.SCHEDULE]: {
                   lastMsgScanAt: 0,

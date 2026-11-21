@@ -212,14 +212,16 @@ async function refreshLiveSchedule() {
   renderCountdowns();
 }
 
-async function saveAll(silent = false) {
+async function saveAll(silent = false, forceNavigate = false) {
   const payload = collectFormSettings();
-  const res = await sendBg({ action: 'SAVE_SETTINGS', payload });
+  const res = await sendBg({ action: 'SAVE_SETTINGS', payload, forceNavigate });
   if (res?.ok) {
     currentSettings = res.settings;
     $('statusDot').classList.toggle('on', Boolean(payload.enabled));
     renderCountdowns();
-    if (!silent) showToast('Đã lưu cài đặt!');
+    if (!silent) {
+      showToast(res.navigated ? 'Đang chuyển sang Business Suite & tự động chạy...' : 'Đã lưu cài đặt!');
+    }
   } else {
     showToast(res?.error || 'Lỗi lưu cài đặt', true);
   }
@@ -237,8 +239,8 @@ document.querySelectorAll('.tab').forEach((btn) => {
 });
 
 $('model').addEventListener('change', syncCustomModelVisibility);
-$('toggleEnabled').addEventListener('change', () => saveAll(false));
-$('btnSaveControl').addEventListener('click', () => saveAll(false));
+$('toggleEnabled').addEventListener('change', () => saveAll(false, true));
+$('btnSaveControl').addEventListener('click', () => saveAll(false, true));
 $('btnSaveAi').addEventListener('click', () => saveAll(false));
 
 $('btnTestApi').addEventListener('click', async () => {

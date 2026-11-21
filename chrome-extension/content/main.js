@@ -108,6 +108,13 @@ window.TTAR = window.TTAR || {};
       let msgResult = { scanned: 0, replied: 0, stoppedForDraft: false };
       let cmtResult = { scanned: 0, replied: 0, stoppedForDraft: false };
 
+      if (!bs.isBusinessSuitePage() && (settings.enableMessages || settings.enableBusinessComments)) {
+        StatusOverlay.update('busy', 'Đang chuyển sang Business Suite Messages...');
+        await syncScheduleToBg({ runOnNextLoad: true, activeLane: null });
+        window.location.href = 'https://www.tiktok.com/business-suite/messages';
+        return { ok: true, redirected: true };
+      }
+
       if (bs.isBusinessSuitePage()) {
         if (runMsg && settings.enableMessages) {
           const count = Number(settings.messageScanCount) || 10;
