@@ -227,6 +227,53 @@ async function callGeminiApi({ apiKey, model, systemInstruction, userContent, te
   throw lastError || new Error('Gemini API thất bại sau 3 lần thử.');
 }
 
+const VIETNAMESE_STRICT_RULE =
+  'QUY TẮC NGÔN NGỮ BẮT BUỘC (KHÔNG ĐƯỢC VI PHẠM): ' +
+  '100% câu trả lời PHẢI viết bằng tiếng Việt có dấu tự nhiên. ' +
+  'TUYỆT ĐỐI KHÔNG trả lời bằng tiếng Anh, tiếng Trung, tiếng Hàn, tiếng Nhật hay bất kỳ ngôn ngữ nào khác, ' +
+  'kể cả khi khách nhắn/bình luận bằng ngôn ngữ khác hoặc tên tài khoản là tiếng nước ngoài.';
+
+function buildSystemInstruction(settings, type) {
+  const basePrompt = type === 'message' ? settings.messagePrompt : settings.commentPrompt;
+  const kb = String(settings.knowledgeBase || '').trim();
+
+  const sections = [VIETNAMESE_STRICT_RULE, basePrompt];
+
+  if (kb) {
+    sections.push(
+      '=== TÀI LIỆU NỘI BỘ SPA (GÓI DỊCH VỤ & BẢNG GIÁ CHÍNH THỨC) ===\n' +
+        kb +
+        '\n=== QUY TẮC SỬ DỤNG TÀI LIỆU NỘI BỘ ===\n' +
+        '- Đối chiếu tin nhắn/bình luận của khách và nội dung video với TÀI LIỆU NỘI BỘ ở trên.\n' +
+        '- Nếu khách hỏi đúng dịch vụ có trong tài liệu nội bộ: tư vấn và báo CHÍNH XÁC tên gói, giá tiền, liệu trình theo đúng tài liệu (tuyệt đối không tự bịa giá hoặc sai số).\n' +
+        '- Nếu khách hỏi nội dung/dịch vụ KHÔNG có trong tài liệu nội bộ: áp dụng lối văn tư vấn mặc định ở trên.'
+    );
+  }
+
+  return sections.filter(Boolean).join('\n\n');
+}
+
+function isLikelyNonVietnamese(text) {
+  const str = String(text || '').trim();
+  if (!str) return false;
+  // Chặn ký tự Trung / Nhật / Hàn / Thái / Cyrillic / Ả Rập
+  if (/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af\u0e00-\u0e7f\u0400-\u04ff\u0600-\u06ff]/.test(str)) {
+    return true;
+  }
+  // Nếu câu dài >= 20 ký tự nhưng không có bất kỳ ký tự tiếng Việt có dấu nào -> nghi ngờ trả lời tiếng Anh/ngoại ngữ
+  const hasVietnameseDiacritics = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(
+    str
+  );
+  if (str.length >= 20 && !hasVietnameseDiacritics) {
+    return true;
+  }
+  // Chặn các cụm câu trả lời tiếng Anh phổ biến
+  if (/\b(hello|hi there|thank you|please|price|inbox us|message us|contact us|available|service)\b/i.test(str)) {
+    return true;
+  }
+  return false;
+}
+
 function buildUserPrompt(payload) {
   if (payload.type === 'message') {
     const historyLines = (payload.history || [])
@@ -271,29 +318,30 @@ async function handleGenerateReply(payload) {
       ? settings.customModel.trim()
       : settings.model || 'gemini-3.8-flash';
 
-  const basePrompt =
-    payload.type === 'message' ? settings.messagePrompt : settings.commentPrompt;
-
-  const kb = (settings.knowledgeBase || '').trim();
-  const systemInstruction = kb
-    ? `${basePrompt}\n\n` +
-      `=== TÀI LIỆU NỘI BỘ SPA (BẢNG GIÁ & GÓI DỊCH VỤ) ===\n${kb}\n=== HẾT TÀI LIỆU NỘI BỘ ===\n\n` +
-      `QUY TẮC SỬ DỤNG TÀI LIỆU NỘI BỘ:\n` +
-      `1. Luôn đối chiếu câu hỏi/bình luận của khách (và nội dung video đính kèm) với TÀI LIỆU NỘI BỘ ở trên.\n` +
-      `2. Nếu khách hỏi đúng dịch vụ/gói có trong tài liệu nội bộ -> tư vấn và báo CHÍNH XÁC tên dịch vụ, giá tiền, liệu trình, ưu đãi theo đúng tài liệu (tuyệt đối không tự bịa giá khác).\n` +
-      `3. Nếu khách hỏi dịch vụ KHÔNG có trong tài liệu nội bộ, hoặc chỉ bình luận tương tác/khen ngợi -> giữ nguyên lối văn CSKH tự nhiên mặc định ở trên, tuyệt đối không bịa giá.`
-    : basePrompt;
-
+  const systemInstruction = buildSystemInstruction(settings, payload.type);
   const userContent = buildUserPrompt(payload);
 
   try {
-    const replyText = await callGeminiApi({
+    let replyText = await callGeminiApi({
       apiKey: settings.apiKey,
       model: activeModel,
       systemInstruction,
       userContent,
       temperature: settings.temperature
     });
+
+    // Lớp bảo vệ tầng 2: nếu phát hiện model lỡ trả lời bằng ngôn ngữ khác -> ép viết lại 100% tiếng Việt có dấu
+    if (isLikelyNonVietnamese(replyText)) {
+      replyText = await callGeminiApi({
+        apiKey: settings.apiKey,
+        model: activeModel,
+        systemInstruction:
+          VIETNAMESE_STRICT_RULE +
+          ' Giữ nguyên thông tin giá/dịch vụ, không dùng markdown, chỉ xuất đúng câu trả lời tiếng Việt.',
+        userContent: `Hãy chuyển toàn bộ câu trả lời sau sang tiếng Việt có dấu tự nhiên, lịch sự theo phong cách CSKH spa:\n"${replyText}"`,
+        temperature: 0.2
+      });
+    }
 
     await appendLog({
       level: 'info',

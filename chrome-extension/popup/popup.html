@@ -170,30 +170,24 @@
 
       <div class="card">
         <label class="field">
-          <div style="display:flex;justify-content:space-between;align-items:center;">
-            <span>Tài liệu nội bộ Spa (Gói dịch vụ, Bảng giá, Ưu đãi)</span>
-            <button type="button" class="btn ghost" id="btnImportKb" style="flex:0;padding:3px 8px;font-size:10px;">Nạp file .txt/.md</button>
-          </div>
-          <input type="file" id="kbFileInput" accept=".txt,.md,.csv" class="hidden" />
+          <span>Tài liệu nội bộ Spa (Gói dịch vụ & Bảng giá — AI ưu tiên đối chiếu)</span>
           <textarea
             id="knowledgeBase"
             rows="6"
-            placeholder="Ví dụ:&#10;- Triệt râu lẻ: 300k/buổi | Bảo hành 2 năm: 3.100k (má, quai hàm, mép, cằm)&#10;- Triệt nách IPL: lẻ 150k/buổi | Bảo hành 2 năm: 1.100k&#10;- Trị thâm nách Laser Carbon: 300k/buổi | Liệu trình 4 buổi: 990k&#10;- Peel nách: 1.5tr giảm còn 1tr&#10;- Địa chỉ: ... | Giờ mở cửa: ..."
+            placeholder="Ví dụ:
+- Triệt râu: giá lẻ 300k/buổi, liệu trình bảo hành 2 năm 3.100k (má, quai hàm, mép, cằm)
+- Trị thâm nách: laser carbon 300k/buổi (liệu trình 4 buổi 990k), peel nách 1.5tr giảm còn 1tr
+- Địa chỉ: ... | Giờ mở cửa: ..."
           ></textarea>
-          <span style="font-size:10px;color:#94a3b8;font-weight:400;">
-            Nếu khách hỏi đúng dịch vụ có trong tài liệu này, AI sẽ báo đúng giá & gói; nếu không có thì trả lời theo lối văn mặc định bên dưới.
-          </span>
         </label>
-      </div>
 
-      <div class="card">
         <label class="field">
-          <span>Kịch bản & Lối văn trả lời Tin nhắn (System Prompt)</span>
+          <span>Kịch bản & Lối văn trả lời Tin nhắn (Mặc định)</span>
           <textarea id="messagePrompt" rows="4"></textarea>
         </label>
 
         <label class="field">
-          <span>Kịch bản & Lối văn trả lời Bình luận (System Prompt)</span>
+          <span>Kịch bản & Lối văn trả lời Bình luận (Mặc định)</span>
           <textarea id="commentPrompt" rows="4"></textarea>
         </label>
       </div>

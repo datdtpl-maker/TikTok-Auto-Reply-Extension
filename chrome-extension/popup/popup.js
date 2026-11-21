@@ -237,22 +237,6 @@ $('toggleEnabled').addEventListener('change', () => saveAll(false));
 $('btnSaveControl').addEventListener('click', () => saveAll(false));
 $('btnSaveAi').addEventListener('click', () => saveAll(false));
 
-$('btnImportKb').addEventListener('click', () => $('kbFileInput').click());
-$('kbFileInput').addEventListener('change', async (e) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
-  try {
-    const text = await file.text();
-    $('knowledgeBase').value = text.trim();
-    await saveAll(true);
-    showToast(`Đã nạp tài liệu (${file.name})!`);
-  } catch (err) {
-    showToast(`Không đọc được file: ${err.message}`, true);
-  } finally {
-    e.target.value = '';
-  }
-});
-
 $('btnTestApi').addEventListener('click', async () => {
   const box = $('apiTestResult');
   box.className = 'notice';
