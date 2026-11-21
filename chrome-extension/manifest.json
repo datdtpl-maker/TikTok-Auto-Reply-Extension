@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TikTok Auto-Reply Gemini AI",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "Tự động quét và trả lời Tin nhắn & Bình luận TikTok Business Suite / Hoạt động bằng Gemini API.",
   "permissions": [
     "storage",
