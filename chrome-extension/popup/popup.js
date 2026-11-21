@@ -89,6 +89,7 @@ function collectFormSettings() {
     apiKey: $('apiKey').value.trim(),
     model: $('model').value,
     customModel: $('customModel').value.trim(),
+    knowledgeBase: $('knowledgeBase').value.trim(),
     messagePrompt: $('messagePrompt').value.trim(),
     commentPrompt: $('commentPrompt').value.trim()
   };
@@ -181,6 +182,7 @@ async function loadState() {
   $('apiKey').value = settings.apiKey || '';
   $('model').value = settings.model || 'gemini-3.8-flash';
   $('customModel').value = settings.customModel || '';
+  $('knowledgeBase').value = settings.knowledgeBase || '';
   $('messagePrompt').value = settings.messagePrompt || '';
   $('commentPrompt').value = settings.commentPrompt || '';
   syncCustomModelVisibility();
@@ -234,6 +236,22 @@ $('model').addEventListener('change', syncCustomModelVisibility);
 $('toggleEnabled').addEventListener('change', () => saveAll(false));
 $('btnSaveControl').addEventListener('click', () => saveAll(false));
 $('btnSaveAi').addEventListener('click', () => saveAll(false));
+
+$('btnImportKb').addEventListener('click', () => $('kbFileInput').click());
+$('kbFileInput').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    $('knowledgeBase').value = text.trim();
+    await saveAll(true);
+    showToast(`Đã nạp tài liệu (${file.name})!`);
+  } catch (err) {
+    showToast(`Không đọc được file: ${err.message}`, true);
+  } finally {
+    e.target.value = '';
+  }
+});
 
 $('btnTestApi').addEventListener('click', async () => {
   const box = $('apiTestResult');

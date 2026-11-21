@@ -26,6 +26,7 @@ const DEFAULT_SETTINGS = {
   customModel: '',
   temperature: 0.5,
   shopName: 'Khải Hoàn Skincare',
+  knowledgeBase: '',
   messagePrompt:
     'Bạn là nhân viên CSKH chuyên nghiệp, thân thiện của Khải Hoàn Skincare. ' +
     'QUY TẮC BẮT BUỘC: Đọc kỹ lịch sử chat, video/dịch vụ khách gửi kèm (nếu có) và tin nhắn mới nhất của khách để trả lời BÁM SÁT ĐÚNG trọng tâm câu hỏi hoặc tình huống của khách. ' +
@@ -270,8 +271,18 @@ async function handleGenerateReply(payload) {
       ? settings.customModel.trim()
       : settings.model || 'gemini-3.8-flash';
 
-  const systemInstruction =
+  const basePrompt =
     payload.type === 'message' ? settings.messagePrompt : settings.commentPrompt;
+
+  const kb = (settings.knowledgeBase || '').trim();
+  const systemInstruction = kb
+    ? `${basePrompt}\n\n` +
+      `=== TÀI LIỆU NỘI BỘ SPA (BẢNG GIÁ & GÓI DỊCH VỤ) ===\n${kb}\n=== HẾT TÀI LIỆU NỘI BỘ ===\n\n` +
+      `QUY TẮC SỬ DỤNG TÀI LIỆU NỘI BỘ:\n` +
+      `1. Luôn đối chiếu câu hỏi/bình luận của khách (và nội dung video đính kèm) với TÀI LIỆU NỘI BỘ ở trên.\n` +
+      `2. Nếu khách hỏi đúng dịch vụ/gói có trong tài liệu nội bộ -> tư vấn và báo CHÍNH XÁC tên dịch vụ, giá tiền, liệu trình, ưu đãi theo đúng tài liệu (tuyệt đối không tự bịa giá khác).\n` +
+      `3. Nếu khách hỏi dịch vụ KHÔNG có trong tài liệu nội bộ, hoặc chỉ bình luận tương tác/khen ngợi -> giữ nguyên lối văn CSKH tự nhiên mặc định ở trên, tuyệt đối không bịa giá.`
+    : basePrompt;
 
   const userContent = buildUserPrompt(payload);
 
