@@ -45,12 +45,10 @@ window.TTAR = window.TTAR || {};
     if (res?.ok && res.settings) {
       settings = res.settings;
       if (res.schedule) {
-        if (!getLastTs(LAST_MSG_KEY) && res.schedule.lastMsgScanAt) {
-          setLastTs(LAST_MSG_KEY, res.schedule.lastMsgScanAt);
-        }
-        if (!getLastTs(LAST_CMT_KEY) && res.schedule.lastCmtScanAt) {
-          setLastTs(LAST_CMT_KEY, res.schedule.lastCmtScanAt);
-        }
+        const bestMsgTs = Math.max(getLastTs(LAST_MSG_KEY), Number(res.schedule.lastMsgScanAt) || 0);
+        const bestCmtTs = Math.max(getLastTs(LAST_CMT_KEY), Number(res.schedule.lastCmtScanAt) || 0);
+        if (bestMsgTs) setLastTs(LAST_MSG_KEY, bestMsgTs);
+        if (bestCmtTs) setLastTs(LAST_CMT_KEY, bestCmtTs);
       }
     }
     return settings;
@@ -113,23 +111,43 @@ window.TTAR = window.TTAR || {};
       if (bs.isBusinessSuitePage()) {
         if (runMsg && settings.enableMessages) {
           const count = Number(settings.messageScanCount) || 10;
+          const startedAt = Date.now();
           await syncScheduleToBg({ activeLane: 'messages' });
           StatusOverlay.update('busy', `Đang quét ${count} hội thoại Tin nhắn gần nhất...`);
-          msgResult = await bs.scanBusinessMessages(settings);
-          const doneAt = Date.now();
-          setLastTs(LAST_MSG_KEY, doneAt);
-          await syncScheduleToBg({ lastMsgScanAt: doneAt, activeLane: null });
+          try {
+            msgResult = await bs.scanBusinessMessages(settings);
+          } finally {
+            const doneAt = Date.now();
+            setLastTs(LAST_MSG_KEY, doneAt);
+            // Đẩy mốc đếm ngược của Bình luận lùi đúng bằng thời gian quét Tin nhắn để không bị trừ giờ nghỉ
+            const prevCmt = getLastTs(LAST_CMT_KEY);
+            const nextCmt = prevCmt ? prevCmt + (doneAt - startedAt) : doneAt;
+            if (!runCmt && prevCmt) {
+              setLastTs(LAST_CMT_KEY, nextCmt);
+              await syncScheduleToBg({ lastMsgScanAt: doneAt, lastCmtScanAt: nextCmt, activeLane: null });
+            } else {
+              await syncScheduleToBg({ lastMsgScanAt: doneAt, activeLane: null });
+            }
+          }
         }
 
         if (runCmt && settings.enableBusinessComments && !msgResult.stoppedForDraft) {
           if (runMsg && settings.enableMessages) await sleep(800);
           const vCount = Number(settings.commentVideoCount) || 5;
+          const startedAt = Date.now();
           await syncScheduleToBg({ activeLane: 'comments' });
           StatusOverlay.update('busy', `Đang quét ${vCount} video Bình luận gần nhất...`);
-          cmtResult = await bs.scanBusinessComments(settings);
-          const doneAt = Date.now();
-          setLastTs(LAST_CMT_KEY, doneAt);
-          await syncScheduleToBg({ lastCmtScanAt: doneAt, activeLane: null });
+          try {
+            cmtResult = await bs.scanBusinessComments(settings);
+          } finally {
+            const doneAt = Date.now();
+            setLastTs(LAST_CMT_KEY, doneAt);
+            // Khi quét Bình luận xong, dời mốc Tin nhắn tương ứng để Tin nhắn nghỉ đủ 100% số giây đã cài (không bị quét lại ngay lập tức)
+            const prevMsg = getLastTs(LAST_MSG_KEY);
+            const nextMsg = runMsg ? doneAt : prevMsg ? prevMsg + (doneAt - startedAt) : doneAt;
+            setLastTs(LAST_MSG_KEY, nextMsg);
+            await syncScheduleToBg({ lastMsgScanAt: nextMsg, lastCmtScanAt: doneAt, activeLane: null });
+          }
         }
 
         if (msgResult.stoppedForDraft || cmtResult.stoppedForDraft) {
@@ -141,10 +159,13 @@ window.TTAR = window.TTAR || {};
         if (runCmt && settings.enableActivityComments) {
           await syncScheduleToBg({ activeLane: 'comments' });
           StatusOverlay.update('busy', 'Đang quét Hoạt động → Bình luận...');
-          cmtResult = await act.scanActivityComments(settings);
-          const doneAt = Date.now();
-          setLastTs(LAST_CMT_KEY, doneAt);
-          await syncScheduleToBg({ lastCmtScanAt: doneAt, activeLane: null });
+          try {
+            cmtResult = await act.scanActivityComments(settings);
+          } finally {
+            const doneAt = Date.now();
+            setLastTs(LAST_CMT_KEY, doneAt);
+            await syncScheduleToBg({ lastCmtScanAt: doneAt, activeLane: null });
+          }
         } else {
           StatusOverlay.update('idle', 'TikTok AI: Chế độ Hoạt động đang tắt');
         }
