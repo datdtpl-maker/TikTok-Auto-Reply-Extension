@@ -29,6 +29,7 @@
       ],
       "js": [
         "content/dom-utils.js",
+        "content/adaptive-dom.js",
         "content/business-suite.js",
         "content/tiktok-activity.js",
         "content/main.js"

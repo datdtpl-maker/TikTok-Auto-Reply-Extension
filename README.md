@@ -39,6 +39,14 @@ Tiện ích mở rộng Google Chrome (Manifest V3) giúp tự động quét, ph
   - **Giới hạn tốc độ gửi/phút:** Cấu hình số lượng trả lời tối đa mỗi phút; khi chạm ngưỡng sẽ tự tạm nghỉ 15 giây rồi tiếp tục, không bỏ sót khách.
   - **Công cụ hỗ trợ:** Nút **Test kết nối Gemini**, **Quét ngay 1 vòng**, **Kiểm tra DOM trang đang mở**, **Nhật ký hoạt động** và **Reset chống trùng**.
 
+### 6. Cơ chế tự thích ứng giao diện 4 tầng (Self-Healing Adaptive DOM)
+- Khi TikTok cập nhật giao diện (đổi tên class CSS, bỏ thuộc tính `data-e2e`, đổi URL `iframe` hoặc gộp `iframe` ra trang chính), module `adaptive-dom.js` tự động chuyển tầng nhận diện theo thứ tự ưu tiên:
+  1. **Tầng 1 (Semantic / `data-e2e` & URL iframe):** Bắt nhanh và chính xác nhất trên giao diện hiện hành.
+  2. **Tầng 2 (Cấu trúc / `role="listitem"` & quét đa `iframe`):** Tự tìm đúng khung Tin nhắn / Bình luận kể cả khi đổi đường dẫn `iframe` hoặc bỏ `iframe`.
+  3. **Tầng 3 (Neo nội dung & mốc thời gian Việt/Anh):** Nhận diện từng dòng hội thoại/video qua chuỗi thời gian (`11:43`, `19/11/2026`, `5 giờ`, `Không có bình luận mới nào`) và nhãn nút (`Trả lời`, `Reply`, `Đăng`, `Gửi`).
+  4. **Tầng 4 (Hình học vị trí DOM — không phụ thuộc class/thuộc tính):** Tự xác định danh sách dọc lặp lại bên trái, khung chat chứa ô nhập liệu bên phải, cô lập từng khối bình luận theo đúng 1 nút `Trả lời`, và nhận diện nút gửi theo màu nhấn `#FE2C55` / phím `Enter`.
+- Kết quả tầng đang kích hoạt (`adaptiveStrategies`) hiển thị trực tiếp khi bấm **Kiểm tra DOM trang đang mở**.
+
 ---
 
 ## Cấu trúc thư mục
@@ -49,6 +57,7 @@ chrome-extension/
 ├── background.js              # Service Worker: gọi Gemini API, tài liệu nội bộ, lọc ngôn ngữ, log & dedupe
 ├── content/
 │   ├── dom-utils.js           # Tiện ích DOM cross-iframe, điền Draft.js/Lexical, tìm nút gửi & thanh trạng thái
+│   ├── adaptive-dom.js        # Động cơ tự thích ứng giao diện 4 tầng (chống gãy khi TikTok đổi UI)
 │   ├── business-suite.js      # Logic quét & trả lời Tin nhắn + Bình luận trên TikTok Business Suite
 │   ├── tiktok-activity.js     # Logic quét & trả lời Bình luận qua Hoạt động trên tiktok.com
 │   └── main.js                # Bộ điều phối phân lịch độc lập, tự F5 & đếm ngược từng giây

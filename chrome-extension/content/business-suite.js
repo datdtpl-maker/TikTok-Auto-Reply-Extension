@@ -78,58 +78,18 @@ window.TTAR = window.TTAR || {};
     return true;
   }
 
-  // ==================== PHẦN 1: IFRAME TIN NHẮN (/messages) ====================
+  // ==================== PHẦN 1: IFRAME TIN NHẮN (/messages) — TỰ THÍCH ỨNG 4 TẦNG ====================
 
   function getMessagesDoc() {
-    const iframe = Array.from(document.querySelectorAll('iframe')).find(
-      (f) => /\/messages/i.test(f.src || '') && f.getBoundingClientRect().width > 100
-    );
-    try {
-      return iframe?.contentDocument || null;
-    } catch (_) {
-      return null;
-    }
+    return ns.adaptive.resolveMessagesDoc();
   }
 
   function getConversationRows(msgDoc, limit = DEFAULT_CONVERSATIONS_COUNT) {
-    if (!msgDoc) return [];
-    const listRoot = msgDoc.querySelector('[data-e2e="dm-new-conversation-list"]') || msgDoc;
-
-    // Ưu tiên selector chuẩn data-e2e của TikTok Messages
-    let rows = Array.from(listRoot.querySelectorAll('[data-e2e="chat-list-item"]')).filter(isVisible);
-
-    // Dự phòng: neo theo mốc thời gian (11:43, 19/11/2026...) trong dm-new-conversation-list
-    if (rows.length === 0) {
-      const timeRegex = /^(\d{1,2}:\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4}|\d+\s*(phút|giờ|ngày))$/i;
-      const anchors = Array.from(listRoot.querySelectorAll('span, p, div')).filter((el) => {
-        if (!isVisible(el) || el.children.length > 1) return false;
-        return timeRegex.test(normalizeText(el.innerText));
-      });
-
-      const seen = new Set();
-      for (const node of anchors) {
-        let cur = node.parentElement;
-        for (let depth = 0; depth < 7 && cur && cur !== listRoot; depth++) {
-          const r = cur.getBoundingClientRect();
-          if (r.width >= 180 && r.width <= 480 && r.height >= 48 && r.height <= 125) {
-            if (!seen.has(cur)) {
-              seen.add(cur);
-              rows.push(cur);
-            }
-            break;
-          }
-          cur = cur.parentElement;
-        }
-      }
-      rows = rows.filter((row) => !rows.some((other) => other !== row && row.contains(other)));
-    }
-
-    rows.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
-    return rows.slice(0, limit);
+    return ns.adaptive.findConversationRows(msgDoc, limit);
   }
 
   async function scrollChatToBottom(msgDoc) {
-    const box = msgDoc.querySelector('[data-e2e="dm-new-chatbox"]') || msgDoc.body;
+    const box = ns.adaptive.findChatbox(msgDoc, getConversationRows(msgDoc, 3)) || msgDoc.body;
     if (!box) return;
     const win = getWin(box);
     const scrollables = [box, ...Array.from(box.querySelectorAll('div'))].filter((el) => {
@@ -144,8 +104,8 @@ window.TTAR = window.TTAR || {};
   }
 
   function extractChatMessagesFromDoc(msgDoc) {
-    const box = msgDoc.querySelector('[data-e2e="dm-new-chatbox"]');
-    if (!box || !isVisible(box)) return { customerName: 'Khách', messages: [] };
+    const box = ns.adaptive.findChatbox(msgDoc, getConversationRows(msgDoc, 3));
+    if (!box || !isVisible(box)) return { customerName: 'Khách', sharedVideoContext: '', messages: [] };
     const boxRect = box.getBoundingClientRect();
 
     // Đọc tên khách ở header chatbox
@@ -348,7 +308,7 @@ window.TTAR = window.TTAR || {};
         continue;
       }
 
-      const box = msgDoc.querySelector('[data-e2e="dm-new-chatbox"]') || msgDoc;
+      const box = ns.adaptive.findChatbox(msgDoc, rows) || msgDoc;
       const inputEl = await waitFor(
         () => findEditableInput(box, [/gửi tin nhắn|send a message/i]),
         4500
@@ -406,20 +366,10 @@ window.TTAR = window.TTAR || {};
     return { scanned, replied, stoppedForDraft: false };
   }
 
-  // ==================== PHẦN 2: TAB BÌNH LUẬN (.infinite-scroll-component + iframe /video/) ====================
+  // ==================== PHẦN 2: TAB BÌNH LUẬN — TỰ THÍCH ỨNG 4 TẦNG ====================
 
   function getCommentVideoRows(limit = DEFAULT_VIDEOS_COUNT) {
-    const container = document.querySelector('.infinite-scroll-component');
-    if (container) {
-      const items = Array.from(container.children).filter(
-        (el) => isVisible(el) && el.getBoundingClientRect().height >= 45
-      );
-      if (items.length > 0) {
-        items.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
-        return items.slice(0, limit);
-      }
-    }
-    return [];
+    return ns.adaptive.findCommentVideoRows(limit);
   }
 
   function getVideoIframe() {
@@ -429,12 +379,7 @@ window.TTAR = window.TTAR || {};
   }
 
   function getVideoDoc() {
-    const iframe = getVideoIframe();
-    try {
-      return iframe?.contentDocument || null;
-    } catch (_) {
-      return null;
-    }
+    return ns.adaptive.resolveVideoDoc();
   }
 
   async function scrollVideoIframeDown(videoDoc, maxSteps = 12) {
@@ -491,18 +436,14 @@ window.TTAR = window.TTAR || {};
     }
     videoCaption = videoCaption.slice(0, 420);
 
-    // Selector chuẩn 100% từ DOM thực tế TikTok: [data-e2e="comment-reply-1"]
-    const replyBtns = Array.from(videoDoc.querySelectorAll('[data-e2e="comment-reply-1"]')).filter(isVisible);
+    // Tìm nút "Trả lời" / "Reply" tự thích ứng (ưu tiên data-e2e, dự phòng text)
+    const replyBtns = ns.adaptive.findCommentReplyButtons(videoDoc);
 
     const comments = [];
     const seen = new Set();
 
     for (const replyBtn of replyBtns) {
-      // DivCommentObjectWrapper bao trọn 1 bình luận gốc + phần "Xem X câu trả lời" của riêng nó
-      const objectWrap =
-        replyBtn.closest('[class*="DivCommentObjectWrapper"]') ||
-        replyBtn.closest('[class*="DivCommentItemWrapper"]')?.parentElement ||
-        replyBtn.closest('[class*="DivCommentItemWrapper"]');
+      const { objectWrap, itemWrap } = ns.adaptive.isolateCommentBlock(replyBtn, videoDoc);
 
       if (!objectWrap || seen.has(objectWrap)) continue;
       seen.add(objectWrap);
@@ -514,7 +455,6 @@ window.TTAR = window.TTAR || {};
         continue;
       }
 
-      const itemWrap = replyBtn.closest('[class*="DivCommentItemWrapper"]') || objectWrap;
       const lines = (itemWrap.innerText || '')
         .split('\n')
         .map((l) => normalizeText(l))
@@ -589,7 +529,7 @@ window.TTAR = window.TTAR || {};
       // Chờ danh sách bình luận trong iframe render (tối đa 4.5s) rồi mới cuộn chậm xuống hết
       await waitFor(
         () =>
-          videoDoc.querySelector('[data-e2e="comment-reply-1"]') ||
+          ns.adaptive.findCommentReplyButtons(videoDoc).length > 0 ||
           /0 bình luận|hãy là người đầu tiên/i.test(videoDoc.body?.innerText || ''),
         4500
       );
@@ -759,7 +699,8 @@ window.TTAR = window.TTAR || {};
       unrepliedCommentsOnScreen: cmtData.comments.map((c) => ({
         author: c.author,
         text: c.commentText
-      }))
+      })),
+      adaptiveStrategies: ns.adaptive.getAdaptiveReport()
     };
   }
 
