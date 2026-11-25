@@ -122,6 +122,8 @@ function isUsefulLearningPair(question, answer) {
   if (q.length > 400 || a.length > 600) return false;
   const aNorm = normalizeVietnameseForMatch(a);
   if (/^(ok|oke|vang|da|cam on|thanks|hi|hello|\.+)$/.test(aNorm)) return false;
+  // Chặn tuyệt đối không học lại địa chỉ nhầm của nhà thuốc (A30 Võ Văn Kiệt)
+  if (aNorm.includes('vo van kiet') || aNorm.includes('a30')) return false;
   return true;
 }
 
@@ -462,21 +464,42 @@ function detectTargetLanguage(payload) {
   return 'vi';
 }
 
+const OFFICIAL_CLINIC_INFO =
+  '=== THÔNG TIN CHÍNH THỨC KHẢI HOÀN SKINCARE PHAN THIẾT (BẮT BUỘC TUÂN THỦ 100%) ===\n' +
+  '- Tên cơ sở: Khải Hoàn Skincare - Chăm sóc da chuẩn y khoa Phan Thiết\n' +
+  '- Địa chỉ duy nhất: Số 01 Vạn Thủy Tú, Phường Đức Thắng, TP. Phan Thiết, Tỉnh Bình Thuận\n' +
+  '- Link bản đồ Google Maps: https://maps.app.goo.gl/j8VVAyXaEUeU1uS56\n' +
+  '- Fanpage chính thức: https://www.facebook.com/khsk.chamsocdachuanykhoaphanthiet/\n' +
+  '- Website: khaihoanskincare.com\n' +
+  '- Hotline / Zalo tư vấn & đặt lịch: 0964 787 144\n' +
+  '- Giờ mở cửa: 07:30 – 20:00 (Thứ 2 – Chủ Nhật)\n' +
+  '- 8 nhóm dịch vụ chuẩn y khoa:\n' +
+  '  1. Lấy Mụn Y Khoa (lấy nhân mụn chuẩn kỹ thuật, làm sạch & phục hồi, hạn chế thâm sẹo)\n' +
+  '  2. Chăm Sóc & Phục Hồi Da (làm sạch sâu, thanh lọc, củng cố hàng rào bảo vệ da, phục hồi da yếu/sau treatment)\n' +
+  '  3. Premium Skin Therapy (chăm sóc da cao cấp kết hợp dưỡng chất & công nghệ hiện đại)\n' +
+  '  4. Meso Remee (liệu trình cá nhân hóa giúp phục hồi, làm sáng, trẻ hóa da)\n' +
+  '  5. Nâng Cơ, Xóa Nhăn (cải thiện độ săn chắc, đàn hồi, định hình đường nét da)\n' +
+  '  6. Peel Da (thay mới bề mặt da, hỗ trợ cải thiện mụn, thâm, sạm)\n' +
+  '  7. Sẹo Rỗ Đa Phương Thức (phác đồ phối hợp chuyên sâu tùy loại sẹo và độ sâu)\n' +
+  '  8. Triệt Lông IPL (công nghệ ánh sáng IPL)\n' +
+  '=== QUY TẮC BẮT BUỘC VỀ ĐỊA CHỈ & GIÁ DỊCH VỤ ===\n' +
+  '- Khi khách hỏi địa chỉ / đường đi / giờ mở cửa: CHỈ trả lời đúng địa chỉ "Số 01 Vạn Thủy Tú, Phường Đức Thắng, TP. Phan Thiết, Tỉnh Bình Thuận" (có thể gửi kèm link Google Maps https://maps.app.goo.gl/j8VVAyXaEUeU1uS56 và Hotline 0964 787 144). TUYỆT ĐỐI KHÔNG nhắc hay nhầm sang địa chỉ khác (đặc biệt CẤM nhắc "A30 Võ Văn Kiệt" vì đó là địa chỉ nhà thuốc, không phải cơ sở Skincare).\n' +
+  '- QUY TẮC CẤM BÁO GIÁ: TUYỆT ĐỐI KHÔNG tự ý báo giá tiền hay đưa ra con số giá cụ thể (trừ khi chủ shop tự ghi rõ bảng giá trong mục TÀI LIỆU NỘI BỘ BỔ SUNG bên dưới). Khi khách hỏi giá dịch vụ, hãy giải thích nhẹ nhàng rằng chi phí tùy theo tình trạng da thực tế và chương trình ưu đãi hiện tại, rồi mời khách mô tả tình trạng da / nhắn tin trực tiếp hoặc gọi/nhắn Zalo 0964 787 144 hoặc ghé Số 01 Vạn Thủy Tú để được soi da và tư vấn chi phí chính xác nhất.';
+
 function buildSystemInstruction(settings, type, targetLang = 'vi', learnedExamples = []) {
   const basePrompt = type === 'message' ? settings.messagePrompt : settings.commentPrompt;
   const kb = String(settings.knowledgeBase || '').trim();
   const langRule = targetLang === 'en' ? ENGLISH_STRICT_RULE : VIETNAMESE_STRICT_RULE;
 
-  const sections = [langRule, basePrompt];
+  const sections = [langRule, basePrompt, OFFICIAL_CLINIC_INFO];
 
   if (kb) {
     sections.push(
-      '=== TÀI LIỆU NỘI BỘ SPA (GÓI DỊCH VỤ & BẢNG GIÁ CHÍNH THỨC) ===\n' +
+      '=== TÀI LIỆU NỘI BỘ BỔ SUNG CỦA SHOP ===\n' +
         kb +
-        '\n=== QUY TẮC SỬ DỤNG TÀI LIỆU NỘI BỘ ===\n' +
-        '- Đối chiếu tin nhắn/bình luận của khách và nội dung video với TÀI LIỆU NỘI BỘ ở trên.\n' +
-        '- Nếu khách hỏi đúng dịch vụ có trong tài liệu nội bộ: tư vấn và báo CHÍNH XÁC tên gói, giá tiền, liệu trình theo đúng tài liệu (tuyệt đối không tự bịa giá hoặc sai số).\n' +
-        '- Nếu khách hỏi nội dung/dịch vụ KHÔNG có trong tài liệu nội bộ: áp dụng lối văn tư vấn mặc định ở trên.'
+        '\n=== QUY TẮC SỬ DỤNG TÀI LIỆU NỘI BỘ BỔ SUNG ===\n' +
+        '- Đối chiếu tin nhắn/bình luận của khách với TÀI LIỆU NỘI BỘ BỔ SUNG ở trên.\n' +
+        '- Chỉ được báo giá cụ thể nếu dịch vụ đó có ghi rõ giá trong TÀI LIỆU NỘI BỘ BỔ SUNG này; nếu không có thì tuyệt đối không tự bịa hoặc tự báo giá.'
     );
   }
 
@@ -490,7 +513,7 @@ function buildSystemInstruction(settings, type, targetLang = 'vi', learnedExampl
     sections.push(
       '=== KINH NGHIỆM TRẢ LỜI THỰC TẾ CỦA SHOP (TỰ HỌC) ===\n' +
         formatted +
-        '\nHãy học theo giọng văn tự nhiên, cách xưng hô và cách tư vấn từ các ví dụ thực tế tương tự ở trên (vẫn ưu tiên giá chính xác từ Tài liệu nội bộ nếu có).'
+        '\nHãy học theo giọng văn tự nhiên, cách xưng hô và cách tư vấn từ các ví dụ thực tế tương tự ở trên. Tuyệt đối vẫn phải tuân thủ đúng địa chỉ Số 01 Vạn Thủy Tú và quy tắc không tự báo giá.'
     );
   }
 
@@ -662,6 +685,15 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     settings.commentPrompt = DEFAULT_SETTINGS.commentPrompt;
   }
   await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: settings });
+  // Dọn sạch các mẫu tự học cũ có chứa địa chỉ nhầm (A30 Võ Văn Kiệt)
+  const mem = await getMemoryItems();
+  const cleanedMem = mem.filter((item) => {
+    const text = normalizeVietnameseForMatch(`${item.question || ''} ${item.answer || ''}`);
+    return !text.includes('vo van kiet') && !text.includes('a30');
+  });
+  if (cleanedMem.length !== mem.length) {
+    await saveMemoryItems(cleanedMem);
+  }
   updateBadge(settings.enabled);
 });
 
