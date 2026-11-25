@@ -332,8 +332,8 @@ function checkRateLimit(maxPerMinute) {
   return true;
 }
 
-function sanitizeReplyForTikTok(text) {
-  return String(text || '')
+function sanitizeReplyForTikTok(text, type = 'message') {
+  let out = String(text || '')
     .replace(/\*\*(.*?)\*\*/g, '$1')
     .replace(/\*(.*?)\*/g, '$1')
     .replace(/^#+\s*/gm, '')
@@ -341,6 +341,41 @@ function sanitizeReplyForTikTok(text) {
     .replace(/^["'“”]+|["'“”]+$/g, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+
+  if (type === 'comment') {
+    // CHÍNH SÁCH TIKTOK CHO BÌNH LUẬN: tuyệt đối cấm SĐT, hotline, Zalo, zl, link ngoài
+    out = out
+      .replace(/https?:\/\/\S+/gi, '')
+      .replace(/\b(?:www\.)?[a-z0-9-]+\.(?:com|vn|net|org|gl|me)\S*/gi, '')
+      .replace(/(?:\+?84|0)(?:[\s.\-]*\d){8,10}\b/g, '')
+      .replace(/\b(?:hotline|zalo|zl|sđt|sdt)\b/gi, '')
+      .replace(/số\s*điện\s*thoại/gi, '')
+      .replace(/\s*\/\s*(?=[\s.,!?]|$)/g, ' ')
+      .replace(/(?:hoặc\s+)?(?:liên hệ|gọi|nhắn)\s+(?:qua\s+)?(?:để\s+|nha|nhé|ạ|[.,!?]|$)/gi, 'nhắn tin trực tiếp cho em ')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/\s+([.,!?])/g, '$1')
+      .trim();
+  } else {
+    // CHÍNH SÁCH TIKTOK CHO TIN NHẮN: thay toàn bộ hotline / Zalo / sđt / số điện thoại bằng "zl"
+    out = out
+      .replace(/\b(?:hotline|sđt|sdt|số\s*điện\s*thoại)\s*[/\-&]\s*(?:zalo|zl)\b/gi, 'zl')
+      .replace(/\b(?:zalo|zl)\s*[/\-&]\s*(?:hotline|sđt|sdt|số\s*điện\s*thoại)\b/gi, 'zl')
+      .replace(/\b(?:hotline|zalo|sđt|sdt)\b/gi, 'zl')
+      .replace(/số\s*điện\s*thoại/gi, 'zl')
+      .replace(/\bzl(?:\s*[/\-]?\s*zl)+\b/gi, 'zl')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/\s+([.,!?])/g, '$1')
+      .trim();
+  }
+
+  return out;
+}
+
+function hasCommentPolicyViolation(text) {
+  const str = String(text || '');
+  return (
+    /https?:\/\/|\b(?:hotline|zalo|zl|sđt|sdt)\b|số\s*điện\s*thoại|(?:\+?84|0)(?:[\s.\-]*\d){8,10}\b/i.test(str)
+  );
 }
 
 function sleep(ms) {
@@ -464,15 +499,7 @@ function detectTargetLanguage(payload) {
   return 'vi';
 }
 
-const OFFICIAL_CLINIC_INFO =
-  '=== THÔNG TIN CHÍNH THỨC KHẢI HOÀN SKINCARE PHAN THIẾT (BẮT BUỘC TUÂN THỦ 100%) ===\n' +
-  '- Tên cơ sở: Khải Hoàn Skincare - Chăm sóc da chuẩn y khoa Phan Thiết\n' +
-  '- Địa chỉ duy nhất: Số 01 Vạn Thủy Tú, Phường Đức Thắng, TP. Phan Thiết, Tỉnh Bình Thuận\n' +
-  '- Link bản đồ Google Maps: https://maps.app.goo.gl/j8VVAyXaEUeU1uS56\n' +
-  '- Fanpage chính thức: https://www.facebook.com/khsk.chamsocdachuanykhoaphanthiet/\n' +
-  '- Website: khaihoanskincare.com\n' +
-  '- Hotline / Zalo tư vấn & đặt lịch: 0964 787 144\n' +
-  '- Giờ mở cửa: 07:30 – 20:00 (Thứ 2 – Chủ Nhật)\n' +
+const OFFICIAL_CLINIC_SERVICES =
   '- 8 nhóm dịch vụ chuẩn y khoa:\n' +
   '  1. Lấy Mụn Y Khoa (lấy nhân mụn chuẩn kỹ thuật, làm sạch & phục hồi, hạn chế thâm sẹo)\n' +
   '  2. Chăm Sóc & Phục Hồi Da (làm sạch sâu, thanh lọc, củng cố hàng rào bảo vệ da, phục hồi da yếu/sau treatment)\n' +
@@ -481,17 +508,40 @@ const OFFICIAL_CLINIC_INFO =
   '  5. Nâng Cơ, Xóa Nhăn (cải thiện độ săn chắc, đàn hồi, định hình đường nét da)\n' +
   '  6. Peel Da (thay mới bề mặt da, hỗ trợ cải thiện mụn, thâm, sạm)\n' +
   '  7. Sẹo Rỗ Đa Phương Thức (phác đồ phối hợp chuyên sâu tùy loại sẹo và độ sâu)\n' +
-  '  8. Triệt Lông IPL (công nghệ ánh sáng IPL)\n' +
-  '=== QUY TẮC BẮT BUỘC VỀ ĐỊA CHỈ & GIÁ DỊCH VỤ ===\n' +
-  '- Khi khách hỏi địa chỉ / đường đi / giờ mở cửa: CHỈ trả lời đúng địa chỉ "Số 01 Vạn Thủy Tú, Phường Đức Thắng, TP. Phan Thiết, Tỉnh Bình Thuận" (có thể gửi kèm link Google Maps https://maps.app.goo.gl/j8VVAyXaEUeU1uS56 và Hotline 0964 787 144). TUYỆT ĐỐI KHÔNG nhắc hay nhầm sang địa chỉ khác (đặc biệt CẤM nhắc "A30 Võ Văn Kiệt" vì đó là địa chỉ nhà thuốc, không phải cơ sở Skincare).\n' +
-  '- QUY TẮC CẤM BÁO GIÁ: TUYỆT ĐỐI KHÔNG tự ý báo giá tiền hay đưa ra con số giá cụ thể (trừ khi chủ shop tự ghi rõ bảng giá trong mục TÀI LIỆU NỘI BỘ BỔ SUNG bên dưới). Khi khách hỏi giá dịch vụ, hãy giải thích nhẹ nhàng rằng chi phí tùy theo tình trạng da thực tế và chương trình ưu đãi hiện tại, rồi mời khách mô tả tình trạng da / nhắn tin trực tiếp hoặc gọi/nhắn Zalo 0964 787 144 hoặc ghé Số 01 Vạn Thủy Tú để được soi da và tư vấn chi phí chính xác nhất.';
+  '  8. Triệt Lông IPL (công nghệ ánh sáng IPL)';
+
+const OFFICIAL_CLINIC_INFO_COMMENT =
+  '=== THÔNG TIN CHÍNH THỨC KHẢI HOÀN SKINCARE PHAN THIẾT (DÙNG CHO BÌNH LUẬN TIKTOK) ===\n' +
+  '- Tên cơ sở: Khải Hoàn Skincare - Chăm sóc da chuẩn y khoa Phan Thiết\n' +
+  '- Địa chỉ duy nhất: Số 01 Vạn Thủy Tú, Phường Đức Thắng, TP. Phan Thiết, Tỉnh Bình Thuận\n' +
+  '- Giờ mở cửa: 07:30 – 20:00 (Thứ 2 – Chủ Nhật)\n' +
+  OFFICIAL_CLINIC_SERVICES + '\n' +
+  '=== QUY TẮC BẮT BUỘC CHỐNG VI PHẠM CHÍNH SÁCH TIKTOK Ở BÌNH LUẬN ===\n' +
+  '- TUYỆT ĐỐI CẤM viết số điện thoại, link web/bản đồ, hoặc các từ "hotline", "sđt", "số điện thoại", "Zalo", "zl", "Facebook" trong bình luận (vì TikTok quét vi phạm chính sách).\n' +
+  '- Khi khách hỏi địa chỉ: CHỈ trả lời đúng địa chỉ "Số 01 Vạn Thủy Tú, Phường Đức Thắng, TP. Phan Thiết" và mời khách nhắn tin (ib) trên TikTok nếu cần gửi định vị hoặc đặt lịch.\n' +
+  '- TUYỆT ĐỐI KHÔNG nhắc nhầm địa chỉ nhà thuốc khác (CẤM nhắc "A30 Võ Văn Kiệt").\n' +
+  '- TUYỆT ĐỐI KHÔNG tự ý báo giá tiền; nếu khách hỏi giá thì mời khách nhắn tin (ib) để em tư vấn theo tình trạng da.';
+
+const OFFICIAL_CLINIC_INFO_MESSAGE =
+  '=== THÔNG TIN CHÍNH THỨC KHẢI HOÀN SKINCARE PHAN THIẾT (DÙNG CHO CUỘC HỘI THOẠI / TIN NHẮN) ===\n' +
+  '- Tên cơ sở: Khải Hoàn Skincare - Chăm sóc da chuẩn y khoa Phan Thiết\n' +
+  '- Địa chỉ duy nhất: Số 01 Vạn Thủy Tú, Phường Đức Thắng, TP. Phan Thiết, Tỉnh Bình Thuận\n' +
+  '- Link bản đồ Google Maps (chỉ gửi khi khách hỏi đường/định vị): https://maps.app.goo.gl/j8VVAyXaEUeU1uS56\n' +
+  '- Kênh liên hệ đặt lịch (CHỈ dùng từ "zl", KHÔNG viết hotline/sđt/Zalo): zl 0964 787 144\n' +
+  '- Giờ mở cửa: 07:30 – 20:00 (Thứ 2 – Chủ Nhật)\n' +
+  OFFICIAL_CLINIC_SERVICES + '\n' +
+  '=== QUY TẮC BẮT BUỘC VỀ ĐỊA CHỈ, CHÍNH SÁCH TIKTOK & GIÁ DỊCH VỤ ===\n' +
+  '- Khi khách hỏi địa chỉ / đường đi / giờ mở cửa: CHỈ trả lời đúng địa chỉ "Số 01 Vạn Thủy Tú, Phường Đức Thắng, TP. Phan Thiết, Tỉnh Bình Thuận". TUYỆT ĐỐI KHÔNG nhắc nhầm địa chỉ nhà thuốc khác (CẤM nhắc "A30 Võ Văn Kiệt").\n' +
+  '- CHÍNH SÁCH TIKTOK TRONG TIN NHẮN: TUYỆT ĐỐI KHÔNG viết các từ "hotline", "sđt", "số điện thoại", "Zalo" — luôn thay bằng "zl" (ví dụ: "anh/chị nhắn qua zl 0964 787 144" hoặc "cho em xin zl của mình nhé").\n' +
+  '- QUY TẮC CẤM BÁO GIÁ: TUYỆT ĐỐI KHÔNG tự ý báo giá tiền hay đưa ra con số giá cụ thể (trừ khi chủ shop tự ghi rõ bảng giá trong mục TÀI LIỆU NỘI BỘ BỔ SUNG bên dưới). Khi khách hỏi giá, hãy giải thích nhẹ nhàng chi phí tùy tình trạng da thực tế và ưu đãi hiện tại, mời khách mô tả tình trạng da hoặc nhắn qua zl 0964 787 144 / ghé Số 01 Vạn Thủy Tú để soi da và báo chi phí chính xác nhất.';
 
 function buildSystemInstruction(settings, type, targetLang = 'vi', learnedExamples = []) {
   const basePrompt = type === 'message' ? settings.messagePrompt : settings.commentPrompt;
   const kb = String(settings.knowledgeBase || '').trim();
   const langRule = targetLang === 'en' ? ENGLISH_STRICT_RULE : VIETNAMESE_STRICT_RULE;
+  const officialInfo = type === 'comment' ? OFFICIAL_CLINIC_INFO_COMMENT : OFFICIAL_CLINIC_INFO_MESSAGE;
 
-  const sections = [langRule, basePrompt, OFFICIAL_CLINIC_INFO];
+  const sections = [langRule, basePrompt, officialInfo];
 
   if (kb) {
     sections.push(
@@ -636,6 +686,20 @@ async function handleGenerateReply(payload) {
       });
     }
 
+    // Lớp bảo vệ tầng 3: Chuẩn hóa chính sách TikTok (Cấm SĐT/hotline/Zalo/link ở bình luận; thay hotline/sđt/Zalo -> zl ở tin nhắn)
+    if (payload.type === 'comment' && hasCommentPolicyViolation(replyText)) {
+      replyText = await callGeminiApi({
+        apiKey: settings.apiKey,
+        model: activeModel,
+        systemInstruction:
+          (targetLang === 'en' ? ENGLISH_STRICT_RULE : VIETNAMESE_STRICT_RULE) +
+          ' Viết lại câu trả lời bình luận TikTok thật tự nhiên, ngắn gọn 1-2 câu. TUYỆT ĐỐI xóa sạch số điện thoại, link, "hotline", "Zalo", "zl", "sđt", chỉ giữ địa chỉ Số 01 Vạn Thủy Tú (nếu khách hỏi địa chỉ) và mời khách nhắn tin (ib) trên TikTok.',
+        userContent: `Viết lại bình luận sau cho sạch 100% chính sách TikTok (không SĐT, không hotline, không Zalo/zl, không link):\n"${replyText}"`,
+        temperature: 0.2
+      });
+    }
+    replyText = sanitizeReplyForTikTok(replyText, payload.type);
+
     await appendLog({
       level: 'info',
       type: payload.type,
@@ -685,13 +749,25 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     settings.commentPrompt = DEFAULT_SETTINGS.commentPrompt;
   }
   await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: settings });
-  // Dọn sạch các mẫu tự học cũ có chứa địa chỉ nhầm (A30 Võ Văn Kiệt)
+  // Dọn sạch các mẫu tự học cũ có chứa địa chỉ nhầm (A30 Võ Văn Kiệt) và chuẩn hóa hotline/Zalo/sđt -> zl
   const mem = await getMemoryItems();
-  const cleanedMem = mem.filter((item) => {
+  let memChanged = false;
+  const cleanedMem = [];
+  for (const item of mem) {
     const text = normalizeVietnameseForMatch(`${item.question || ''} ${item.answer || ''}`);
-    return !text.includes('vo van kiet') && !text.includes('a30');
-  });
-  if (cleanedMem.length !== mem.length) {
+    if (text.includes('vo van kiet') || text.includes('a30')) {
+      memChanged = true;
+      continue;
+    }
+    const sanitizedAnswer = sanitizeReplyForTikTok(item.answer, item.type || 'message');
+    if (sanitizedAnswer !== item.answer) {
+      memChanged = true;
+      cleanedMem.push({ ...item, answer: sanitizedAnswer });
+    } else {
+      cleanedMem.push(item);
+    }
+  }
+  if (memChanged) {
     await saveMemoryItems(cleanedMem);
   }
   updateBadge(settings.enabled);
