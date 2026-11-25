@@ -216,15 +216,56 @@ window.TTAR = window.TTAR || {};
     return false;
   }
 
-  async function processConversationBatch(targetCount, settings, { labelPrefix = 'Tin nhắn', source = 'business_suite_message', isRequest = false } = {}) {
-    const ready = await waitFor(() => {
+  async function waitForMessagesListReady(targetCount, { labelPrefix = 'Tin nhắn', isRequest = false, timeoutMs = 30000 } = {}) {
+    const start = Date.now();
+    let lastStatusSec = -1;
+    const emptyRegex = isRequest
+      ? /không có yêu cầu tin nhắn|no message requests|chưa có yêu cầu|trống/i
+      : /chưa có tin nhắn nào|không có tin nhắn|no messages yet|you have no messages/i;
+
+    while (Date.now() - start < timeoutMs) {
+      const elapsedSec = Math.floor((Date.now() - start) / 1000);
+      if (elapsedSec !== lastStatusSec && elapsedSec >= 2) {
+        lastStatusSec = elapsedSec;
+        StatusOverlay.update('busy', `Đang chờ tải danh sách ${labelPrefix}... (${elapsedSec}s)`);
+      }
+
       const doc = getMessagesDoc();
-      if (!doc) return null;
-      const rows = getConversationRows(doc, targetCount);
-      return rows.length > 0 ? { doc, count: rows.length } : null;
-    }, 6000);
+      if (doc && doc.readyState !== 'loading') {
+        const rows = getConversationRows(doc, targetCount);
+        if (rows.length > 0) {
+          // Chờ nhẹ 700ms cho danh sách ổn định sau khi phần tử đầu tiên xuất hiện
+          await sleep(700);
+          const freshDoc = getMessagesDoc() || doc;
+          const freshRows = getConversationRows(freshDoc, targetCount);
+          return { doc: freshDoc, count: freshRows.length, empty: false };
+        }
+        // Nếu đã qua ít nhất 3s và trang hiện thông báo danh sách trống thật sự -> thoát sớm không cần chờ đủ 30s
+        if (elapsedSec >= 3 && emptyRegex.test(doc.body?.innerText || '')) {
+          return { doc, count: 0, empty: true };
+        }
+      }
+      await sleep(350);
+    }
+    return null;
+  }
+
+  async function processConversationBatch(targetCount, settings, { labelPrefix = 'Tin nhắn', source = 'business_suite_message', isRequest = false } = {}) {
+    const ready = await waitForMessagesListReady(targetCount, {
+      labelPrefix,
+      isRequest,
+      timeoutMs: isRequest ? 15000 : 30000
+    });
 
     if (!ready) {
+      if (!isRequest) {
+        StatusOverlay.update('error', `${labelPrefix}: Trang tải quá chậm (>30s), sẽ thử lại vòng sau`);
+        await logStep('message', 'System', `Chờ danh sách ${labelPrefix}`, '', 'Trang tải quá 30s chưa thấy hội thoại', 'error');
+      }
+      return { scanned: 0, replied: 0, stoppedForDraft: false };
+    }
+
+    if (ready.empty || ready.count === 0) {
       return { scanned: 0, replied: 0, stoppedForDraft: false };
     }
 
@@ -255,7 +296,7 @@ window.TTAR = window.TTAR || {};
             expectedName.toLowerCase().includes(cur.customerName.toLowerCase().slice(0, 8)));
         const changedFromPrev = prevHeaderName && cur.customerName !== prevHeaderName;
         return (matchedExpected || changedFromPrev) && cur.messages.length > 0;
-      }, 4000);
+      }, 10000);
       await sleep(700);
       await scrollChatToBottom(msgDoc);
       await sleep(300);
@@ -394,8 +435,12 @@ window.TTAR = window.TTAR || {};
       return { scanned: 0, replied: 0, stoppedForDraft: false };
     }
 
-    // Chờ iframe /messages sẵn sàng
-    const msgDocReady = await waitFor(() => getMessagesDoc(), 8000);
+    // Chờ iframe /messages sẵn sàng (tối đa 25s cho máy/mạng tải chậm)
+    StatusOverlay.update('busy', 'Đang chờ khung Tin nhắn tải xong...');
+    const msgDocReady = await waitFor(() => {
+      const d = getMessagesDoc();
+      return d && d.body ? d : null;
+    }, 25000);
     if (!msgDocReady) {
       StatusOverlay.update('error', 'Tin nhắn: Không tải được iframe danh sách hội thoại');
       await logStep('message', 'System', 'Quét tab Tin nhắn', '', 'Không tìm thấy iframe /messages', 'error');
@@ -584,16 +629,24 @@ window.TTAR = window.TTAR || {};
     const switched = await switchBusinessTab('comments');
     if (!switched) return { scanned: 0, replied: 0, stoppedForDraft: false };
 
+    const startWaitVideos = Date.now();
+    let lastVidSec = -1;
     const videoRows = await waitFor(() => {
+      const sec = Math.floor((Date.now() - startWaitVideos) / 1000);
+      if (sec !== lastVidSec && sec >= 2) {
+        lastVidSec = sec;
+        StatusOverlay.update('busy', `Đang chờ tải danh sách video Bình luận... (${sec}s)`);
+      }
       const items = getCommentVideoRows(targetVideos);
       return items.length > 0 ? items : null;
-    }, 7000);
+    }, 25000);
 
     if (!videoRows || videoRows.length === 0) {
-      StatusOverlay.update('error', 'Bình luận: Không đọc được danh sách video');
-      await logStep('comment', 'System', 'Quét tab Bình luận', '', 'Không thấy .infinite-scroll-component', 'error');
+      StatusOverlay.update('error', 'Bình luận: Trang tải quá chậm (>25s), chưa thấy danh sách video');
+      await logStep('comment', 'System', 'Quét tab Bình luận', '', 'Quá 25s chưa thấy danh sách video', 'error');
       return { scanned: 0, replied: 0, stoppedForDraft: false };
     }
+    await sleep(600);
 
     let replied = 0;
 
@@ -608,23 +661,23 @@ window.TTAR = window.TTAR || {};
       flashHighlight(vRow, '#38bdf8');
       humanClick(vRow);
 
-      // Chờ iframe video đổi src và tải xong
+      // Chờ iframe video đổi src và tải xong (tối đa 15s)
       await waitFor(() => {
         const doc = getVideoDoc();
         const curSrc = getVideoIframe()?.src || '';
         return doc && doc.readyState === 'complete' && (vIdx === 0 || curSrc !== prevSrc) ? doc : null;
-      }, 7000);
+      }, 15000);
       await sleep(1600);
 
       const videoDoc = getVideoDoc();
       if (!videoDoc) continue;
 
-      // Chờ danh sách bình luận trong iframe render (tối đa 4.5s) rồi mới cuộn chậm xuống hết
+      // Chờ danh sách bình luận trong iframe render (tối đa 12s) rồi mới cuộn chậm xuống hết
       await waitFor(
         () =>
           ns.adaptive.findCommentReplyButtons(videoDoc).length > 0 ||
           /0 bình luận|0 comments|hãy là người đầu tiên|be the first to comment/i.test(videoDoc.body?.innerText || ''),
-        4500
+        12000
       );
 
       StatusOverlay.update('busy', `Bình luận ${vIdx + 1}/${videoRows.length}: Đang kéo xuống tải hết bình luận...`);
