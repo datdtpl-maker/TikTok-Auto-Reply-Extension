@@ -95,6 +95,14 @@
 
         <div class="row-toggle">
           <div>
+            <div class="row-title">Tự học thông minh từ tin nhắn Shop</div>
+            <div class="row-desc">Tự ghi nhớ cách shop/nhân viên trả lời thực tế để AI trả lời giống giọng văn shop hơn</div>
+          </div>
+          <input type="checkbox" id="enableSelfLearning" />
+        </div>
+
+        <div class="row-toggle">
+          <div>
             <div class="row-title">Tự F5 làm mới trước mỗi vòng quét</div>
             <div class="row-desc">Tải lại trang định kỳ để bắt tin nhắn & bình luận mới nhất</div>
           </div>
@@ -202,6 +210,30 @@
           <span>Kịch bản & Lối văn trả lời Bình luận (Mặc định)</span>
           <textarea id="commentPrompt" rows="4"></textarea>
         </label>
+      </div>
+
+      <div class="card">
+        <div class="row-toggle" style="padding-top:0;border-bottom:1px solid rgba(148,163,184,0.18);margin-bottom:8px;">
+          <div>
+            <div class="row-title">Bộ nhớ tự học AI (<span id="memoryCount">0</span> mẫu)</div>
+            <div class="row-desc">Tự động học từ hội thoại thực tế của shop + cho phép dạy thêm mẫu chuẩn</div>
+          </div>
+          <button class="btn ghost" id="btnClearMemory" type="button" style="padding:4px 8px;font-size:11px;">Xóa bộ nhớ</button>
+        </div>
+        <label class="field">
+          <span>Dạy thêm mẫu chuẩn — Khách hỏi</span>
+          <input type="text" id="memQuestion" placeholder="vd: Triệt râu giá bao nhiêu shop?" />
+        </label>
+        <label class="field">
+          <span>Câu trả lời mẫu của Shop</span>
+          <textarea id="memAnswer" rows="2" placeholder="vd: Dạ triệt râu bên em giá lẻ 300k/buổi, liệu trình bảo hành 2 năm 3.100k anh nhé!"></textarea>
+        </label>
+        <div class="actions" style="margin-bottom:8px;">
+          <button class="btn secondary" id="btnAddMemory" type="button">Thêm vào bộ nhớ AI</button>
+        </div>
+        <div class="logs-list" id="memoryList" style="max-height:160px;">
+          <div class="empty">Chưa có mẫu tự học nào. Khi quét tin nhắn shop đã trả lời, AI sẽ tự học dần.</div>
+        </div>
       </div>
     </section>
 

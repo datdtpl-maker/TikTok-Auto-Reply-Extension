@@ -266,6 +266,18 @@ window.TTAR = window.TTAR || {};
         continue;
       }
 
+      // Tự học thụ động từ các cặp hỏi-đáp thực tế của nhân viên shop trong hội thoại
+      if (settings.enableSelfLearning !== false && messages.length >= 2) {
+        sendRuntimeMessage({
+          action: 'LEARN_FROM_HISTORY',
+          payload: {
+            type: 'message',
+            history: messages,
+            context: sharedVideoContext || ''
+          }
+        }).catch(() => {});
+      }
+
       const lastMsg = messages[messages.length - 1];
       if (lastMsg.sender === 'shop') {
         await logStep('message', customerName, `Kênh đã trả lời cuối ("${lastMsg.text.slice(0, 38)}") → Bỏ qua`);

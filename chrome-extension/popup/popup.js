@@ -73,6 +73,40 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;');
 }
 
+function renderMemory(memory, memoryCount) {
+  const countEl = $('memoryCount');
+  const list = $('memoryList');
+  if (countEl) countEl.textContent = String(memoryCount ?? (memory?.length || 0));
+  if (!list) return;
+  if (!memory || memory.length === 0) {
+    list.innerHTML = '<div class="empty">Chưa có mẫu tự học nào. Khi quét tin nhắn shop đã trả lời, AI sẽ tự học dần.</div>';
+    return;
+  }
+  list.innerHTML = memory
+    .map((item) => {
+      const badge = item.source === 'manual' ? 'Mẫu chuẩn' : item.source === 'human_shop' ? 'Học từ Shop' : 'AI đã gửi';
+      return `
+        <div class="log-item info">
+          <div class="log-meta">
+            <span>${badge}</span>
+            <button type="button" data-del-mem="${escapeHtml(item.id)}" style="background:none;border:none;color:#f87171;cursor:pointer;font-size:11px;padding:0;">Xóa</button>
+          </div>
+          <div class="log-in">Khách: ${escapeHtml(item.question)}</div>
+          <div class="log-out">Shop: ${escapeHtml(item.answer)}</div>
+        </div>
+      `;
+    })
+    .join('');
+
+  list.querySelectorAll('[data-del-mem]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await sendBg({ action: 'DELETE_MEMORY_ITEM', payload: { id: btn.dataset.delMem } });
+      loadState();
+      showToast('Đã xóa mẫu khỏi bộ nhớ AI.');
+    });
+  });
+}
+
 function collectFormSettings() {
   return {
     enabled: $('toggleEnabled').checked,
@@ -80,6 +114,7 @@ function collectFormSettings() {
     enableMessageRequests: $('enableMessageRequests').checked,
     enableBusinessComments: $('enableBusinessComments').checked,
     enableActivityComments: $('enableActivityComments').checked,
+    enableSelfLearning: $('enableSelfLearning').checked,
     autoReloadBeforeScan: $('autoReloadBeforeScan').checked,
     draftOnly: $('draftOnly').checked,
     messageScanIntervalSec: Math.max(10, Number($('messageScanIntervalSec').value) || 20),
@@ -163,7 +198,7 @@ async function loadState() {
   const res = await sendBg({ action: 'GET_STATE' });
   if (!res?.ok) return;
 
-  const { settings, stats, logs, schedule } = res;
+  const { settings, stats, logs, schedule, memory, memoryCount } = res;
   currentSettings = settings;
   if (schedule) currentSchedule = schedule;
 
@@ -174,6 +209,7 @@ async function loadState() {
   $('enableMessageRequests').checked = settings.enableMessageRequests !== false;
   $('enableBusinessComments').checked = Boolean(settings.enableBusinessComments);
   $('enableActivityComments').checked = Boolean(settings.enableActivityComments);
+  $('enableSelfLearning').checked = settings.enableSelfLearning !== false;
   $('autoReloadBeforeScan').checked = settings.autoReloadBeforeScan !== false;
   $('draftOnly').checked = Boolean(settings.draftOnly);
   $('messageScanIntervalSec').value = settings.messageScanIntervalSec || 20;
@@ -197,6 +233,7 @@ async function loadState() {
   $('statErr').textContent = stats.errors || 0;
 
   renderLogs(logs);
+  renderMemory(memory, memoryCount);
   renderCountdowns();
 }
 
@@ -306,6 +343,30 @@ $('btnClearLogs').addEventListener('click', async () => {
 $('btnClearDedupe').addEventListener('click', async () => {
   await sendBg({ action: 'CLEAR_PROCESSED' });
   showToast('Đã reset bộ nhớ chống trùng.');
+});
+
+$('btnAddMemory').addEventListener('click', async () => {
+  const question = $('memQuestion').value.trim();
+  const answer = $('memAnswer').value.trim();
+  if (question.length < 3 || answer.length < 10) {
+    showToast('Nhập câu hỏi (>=3 ký tự) và câu trả lời (>=10 ký tự).', true);
+    return;
+  }
+  const res = await sendBg({ action: 'ADD_MEMORY_ITEM', payload: { type: 'message', question, answer } });
+  if (res?.ok && res.added) {
+    $('memQuestion').value = '';
+    $('memAnswer').value = '';
+    loadState();
+    showToast('Đã lưu mẫu chuẩn vào bộ nhớ AI!');
+  } else {
+    showToast(res?.duplicate ? 'Mẫu này đã có trong bộ nhớ.' : 'Không thể lưu mẫu.', true);
+  }
+});
+
+$('btnClearMemory').addEventListener('click', async () => {
+  await sendBg({ action: 'CLEAR_MEMORY' });
+  loadState();
+  showToast('Đã xóa toàn bộ bộ nhớ tự học AI.');
 });
 
 loadState();

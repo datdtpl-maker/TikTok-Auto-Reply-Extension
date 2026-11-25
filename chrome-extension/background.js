@@ -7,7 +7,9 @@ const STORAGE_KEYS = {
   LOGS: 'tt_ar_logs',
   PROCESSED: 'tt_ar_processed',
   STATS: 'tt_ar_stats',
-  SCHEDULE: 'tt_ar_schedule'
+  SCHEDULE: 'tt_ar_schedule',
+  MEMORY: 'tt_ar_memory',
+  BOT_REPLIES: 'tt_ar_bot_replies'
 };
 
 const DEFAULT_SETTINGS = {
@@ -16,6 +18,7 @@ const DEFAULT_SETTINGS = {
   enableMessageRequests: true,
   enableBusinessComments: true,
   enableActivityComments: true,
+  enableSelfLearning: true,
   autoReloadBeforeScan: true,
   draftOnly: false,
   scanIntervalSec: 20,
@@ -47,7 +50,196 @@ const DEFAULT_SETTINGS = {
 
 const MAX_LOGS = 150;
 const MAX_PROCESSED = 1000;
+const MAX_MEMORY_ITEMS = 200;
+const MAX_BOT_REPLY_HASHES = 500;
 const GEMINI_TIMEOUT_MS = 25000;
+
+// === SELF-LEARNING FEW-SHOT MEMORY ENGINE ===
+function normalizeVietnameseForMatch(text) {
+  return String(text || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const VI_STOPWORDS = new Set([
+  'la', 'va', 'cua', 'cho', 'voi', 'khong', 'co', 'duoc', 'nha', 'nhe', 'a', 'oi', 'em', 'anh', 'chi', 'ban', 'shop', 'ben', 'minh', 'tu', 'thi', 'ma', 'da', 'se', 'dang', 'mot', 'cac', 'nay', 'do', 'gi'
+]);
+
+function extractSearchTokens(text) {
+  const norm = normalizeVietnameseForMatch(text);
+  if (!norm) return new Set();
+  const words = norm.split(' ').filter((w) => w.length >= 2 && !VI_STOPWORDS.has(w));
+  const tokens = new Set(words);
+  for (let i = 0; i < words.length - 1; i++) {
+    tokens.add(`${words[i]}_${words[i + 1]}`);
+  }
+  return tokens;
+}
+
+function memoryKey(type, question, answer) {
+  const q = normalizeVietnameseForMatch(question).slice(0, 120);
+  const a = normalizeVietnameseForMatch(answer).slice(0, 120);
+  return `${type}|${q}|${a}`;
+}
+
+async function getMemoryItems() {
+  const res = await chrome.storage.local.get(STORAGE_KEYS.MEMORY);
+  return Array.isArray(res[STORAGE_KEYS.MEMORY]) ? res[STORAGE_KEYS.MEMORY] : [];
+}
+
+async function saveMemoryItems(items) {
+  const trimmed = items.slice(0, MAX_MEMORY_ITEMS);
+  await chrome.storage.local.set({ [STORAGE_KEYS.MEMORY]: trimmed });
+  return trimmed;
+}
+
+async function getBotReplySet() {
+  const res = await chrome.storage.local.get(STORAGE_KEYS.BOT_REPLIES);
+  return new Set(Array.isArray(res[STORAGE_KEYS.BOT_REPLIES]) ? res[STORAGE_KEYS.BOT_REPLIES] : []);
+}
+
+async function recordBotReplyText(replyText) {
+  const norm = normalizeVietnameseForMatch(replyText).slice(0, 160);
+  if (!norm) return;
+  const res = await chrome.storage.local.get(STORAGE_KEYS.BOT_REPLIES);
+  const list = Array.isArray(res[STORAGE_KEYS.BOT_REPLIES]) ? res[STORAGE_KEYS.BOT_REPLIES] : [];
+  if (!list.includes(norm)) {
+    list.unshift(norm);
+    if (list.length > MAX_BOT_REPLY_HASHES) list.length = MAX_BOT_REPLY_HASHES;
+    await chrome.storage.local.set({ [STORAGE_KEYS.BOT_REPLIES]: list });
+  }
+}
+
+function isUsefulLearningPair(question, answer) {
+  const q = String(question || '').trim();
+  const a = String(answer || '').trim();
+  if (q.length < 3 || a.length < 10) return false;
+  if (q.length > 400 || a.length > 600) return false;
+  const aNorm = normalizeVietnameseForMatch(a);
+  if (/^(ok|oke|vang|da|cam on|thanks|hi|hello|\.+)$/.test(aNorm)) return false;
+  return true;
+}
+
+async function addMemoryPair({ type = 'message', question, answer, context = '', source = 'human_shop' }) {
+  if (!isUsefulLearningPair(question, answer)) return { added: false };
+  const items = await getMemoryItems();
+  const key = memoryKey(type, question, answer);
+  const existingIdx = items.findIndex((it) => it.key === key);
+  const weight = source === 'manual' ? 2.5 : source === 'human_shop' ? 2.0 : 1.0;
+
+  if (existingIdx >= 0) {
+    // Upgrade source priority if human/manual confirmed it
+    if (weight > (items[existingIdx].weight || 1)) {
+      items[existingIdx].source = source;
+      items[existingIdx].weight = weight;
+      items[existingIdx].updatedAt = new Date().toISOString();
+      await saveMemoryItems(items);
+    }
+    return { added: false, duplicate: true };
+  }
+
+  const entry = {
+    id: crypto.randomUUID(),
+    key,
+    type,
+    question: String(question).trim(),
+    answer: String(answer).trim(),
+    context: String(context || '').trim().slice(0, 160),
+    source,
+    weight,
+    createdAt: new Date().toISOString(),
+    usedCount: 0
+  };
+  items.unshift(entry);
+  await saveMemoryItems(items);
+  return { added: true, entry };
+}
+
+async function learnFromConversationHistory({ type = 'message', history = [], context = '' }) {
+  const settings = await getSettings();
+  if (settings.enableSelfLearning === false) return { learned: 0 };
+  if (!Array.isArray(history) || history.length < 2) return { learned: 0 };
+
+  const botReplySet = await getBotReplySet();
+  let learned = 0;
+
+  // Group consecutive customer messages followed by consecutive shop messages
+  let i = 0;
+  while (i < history.length) {
+    if (history[i]?.sender !== 'customer') {
+      i++;
+      continue;
+    }
+    const custParts = [];
+    while (i < history.length && history[i]?.sender === 'customer') {
+      if (history[i].text) custParts.push(history[i].text.trim());
+      i++;
+    }
+    const shopParts = [];
+    while (i < history.length && history[i]?.sender === 'shop') {
+      if (history[i].text) shopParts.push(history[i].text.trim());
+      i++;
+    }
+    if (!custParts.length || !shopParts.length) continue;
+
+    const question = custParts.join(' ');
+    const answer = shopParts.join(' ');
+    const answerNorm = normalizeVietnameseForMatch(answer).slice(0, 160);
+    // Prioritize learning when a human agent replied (not our own bot)
+    const isBot = botReplySet.has(answerNorm);
+    const res = await addMemoryPair({
+      type,
+      question,
+      answer,
+      context,
+      source: isBot ? 'bot_sent' : 'human_shop'
+    });
+    if (res.added) learned++;
+  }
+
+  return { learned };
+}
+
+async function retrieveRelevantMemories(type, queryText, contextText = '', limit = 4) {
+  const items = await getMemoryItems();
+  if (!items.length) return [];
+
+  const queryTokens = extractSearchTokens(`${queryText || ''} ${contextText || ''}`);
+  if (queryTokens.size === 0) return [];
+
+  const scored = [];
+  for (const item of items) {
+    if (item.type && item.type !== type) continue;
+    const itemTokens = extractSearchTokens(`${item.question} ${item.context || ''}`);
+    if (itemTokens.size === 0) continue;
+
+    let overlap = 0;
+    for (const tok of queryTokens) {
+      if (itemTokens.has(tok)) {
+        // Bigrams (containing '_') get double weight for precision
+        overlap += tok.includes('_') ? 2.0 : 1.0;
+      }
+    }
+    if (overlap <= 0) continue;
+
+    const denom = Math.sqrt(queryTokens.size * itemTokens.size);
+    const similarity = overlap / Math.max(1, denom);
+    const sourceBoost = item.source === 'manual' ? 1.35 : item.source === 'human_shop' ? 1.2 : 0.85;
+    const score = similarity * sourceBoost;
+
+    if (score >= 0.18) {
+      scored.push({ item, score });
+    }
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit).map((s) => s.item);
+}
 
 let recentReplyTimestamps = [];
 
@@ -270,7 +462,7 @@ function detectTargetLanguage(payload) {
   return 'vi';
 }
 
-function buildSystemInstruction(settings, type, targetLang = 'vi') {
+function buildSystemInstruction(settings, type, targetLang = 'vi', learnedExamples = []) {
   const basePrompt = type === 'message' ? settings.messagePrompt : settings.commentPrompt;
   const kb = String(settings.knowledgeBase || '').trim();
   const langRule = targetLang === 'en' ? ENGLISH_STRICT_RULE : VIETNAMESE_STRICT_RULE;
@@ -285,6 +477,20 @@ function buildSystemInstruction(settings, type, targetLang = 'vi') {
         '- Đối chiếu tin nhắn/bình luận của khách và nội dung video với TÀI LIỆU NỘI BỘ ở trên.\n' +
         '- Nếu khách hỏi đúng dịch vụ có trong tài liệu nội bộ: tư vấn và báo CHÍNH XÁC tên gói, giá tiền, liệu trình theo đúng tài liệu (tuyệt đối không tự bịa giá hoặc sai số).\n' +
         '- Nếu khách hỏi nội dung/dịch vụ KHÔNG có trong tài liệu nội bộ: áp dụng lối văn tư vấn mặc định ở trên.'
+    );
+  }
+
+  if (Array.isArray(learnedExamples) && learnedExamples.length > 0) {
+    const formatted = learnedExamples
+      .map((ex, idx) => {
+        const tag = ex.source === 'manual' ? 'Mẫu chuẩn' : ex.source === 'human_shop' ? 'Shop đã trả lời' : 'Lịch sử';
+        return `${idx + 1}. [${tag}] Khách hỏi: "${ex.question}"\n   -> Shop trả lời: "${ex.answer}"`;
+      })
+      .join('\n');
+    sections.push(
+      '=== KINH NGHIỆM TRẢ LỜI THỰC TẾ CỦA SHOP (TỰ HỌC) ===\n' +
+        formatted +
+        '\nHãy học theo giọng văn tự nhiên, cách xưng hô và cách tư vấn từ các ví dụ thực tế tương tự ở trên (vẫn ưu tiên giá chính xác từ Tài liệu nội bộ nếu có).'
     );
   }
 
@@ -357,7 +563,16 @@ async function handleGenerateReply(payload) {
       : settings.model || 'gemini-3.8-flash';
 
   const targetLang = detectTargetLanguage(payload);
-  const systemInstruction = buildSystemInstruction(settings, payload.type, targetLang);
+  const learnedExamples =
+    settings.enableSelfLearning !== false
+      ? await retrieveRelevantMemories(
+          payload.type,
+          payload.latestText,
+          payload.sharedVideoContext || payload.videoCaption || '',
+          4
+        )
+      : [];
+  const systemInstruction = buildSystemInstruction(settings, payload.type, targetLang, learnedExamples);
   const userContent = buildUserPrompt(payload);
 
   try {
@@ -488,17 +703,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     try {
       switch (message?.action) {
         case 'GET_STATE': {
-          const [settings, stats, logsRes, schedRes] = await Promise.all([
+          const [settings, stats, logsRes, schedRes, memory] = await Promise.all([
             getSettings(),
             getStats(),
             chrome.storage.local.get(STORAGE_KEYS.LOGS),
-            chrome.storage.local.get(STORAGE_KEYS.SCHEDULE)
+            chrome.storage.local.get(STORAGE_KEYS.SCHEDULE),
+            getMemoryItems()
           ]);
           sendResponse({
             ok: true,
             settings,
             stats,
             logs: logsRes[STORAGE_KEYS.LOGS] || [],
+            memoryCount: memory.length,
+            memory: memory.slice(0, 30),
             schedule: schedRes[STORAGE_KEYS.SCHEDULE] || {
               lastMsgScanAt: 0,
               lastCmtScanAt: 0,
@@ -587,6 +805,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           // Chỉ lưu chống trùng vĩnh viễn khi đã GỬI THẬT (draftOnly === false)
           if (fingerprint && !draftOnly) {
             await markProcessed(fingerprint, { type, draftOnly: false });
+            if (reply) await recordBotReplyText(reply);
           }
           if (draftOnly) {
             await incrementStat('draftsCreated');
@@ -603,6 +822,32 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             incoming: incoming || '',
             reply: reply || ''
           });
+          sendResponse({ ok: true });
+          break;
+        }
+        case 'LEARN_FROM_HISTORY': {
+          const res = await learnFromConversationHistory(message.payload || {});
+          sendResponse({ ok: true, ...res });
+          break;
+        }
+        case 'ADD_MEMORY_ITEM': {
+          const res = await addMemoryPair({
+            ...(message.payload || {}),
+            source: 'manual'
+          });
+          sendResponse({ ok: true, ...res });
+          break;
+        }
+        case 'DELETE_MEMORY_ITEM': {
+          const id = message.payload?.id;
+          const items = await getMemoryItems();
+          const next = items.filter((item) => item.id !== id);
+          await saveMemoryItems(next);
+          sendResponse({ ok: true, remaining: next.length });
+          break;
+        }
+        case 'CLEAR_MEMORY': {
+          await saveMemoryItems([]);
           sendResponse({ ok: true });
           break;
         }
