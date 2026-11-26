@@ -209,7 +209,7 @@ window.TTAR = window.TTAR || {};
 
     renderCountdownPill();
 
-    if (document.visibilityState !== 'visible') return;
+    // Cho phép tự động quét ngay cả khi cửa sổ profile bị thu nhỏ (minimized) xuống Taskbar
 
     const now = Date.now();
     const msgIntervalMs = Math.max(10, Number(settings.messageScanIntervalSec) || 20) * 1000;

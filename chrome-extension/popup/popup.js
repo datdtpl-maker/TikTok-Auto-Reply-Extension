@@ -369,6 +369,44 @@ $('btnClearMemory').addEventListener('click', async () => {
   showToast('Đã xóa toàn bộ bộ nhớ tự học AI.');
 });
 
+$('btnExportConfig').addEventListener('click', async () => {
+  const res = await sendBg({ action: 'EXPORT_CONFIG' });
+  if (!res?.ok || !res.bundle) {
+    showToast('Không thể xuất cấu hình.', true);
+    return;
+  }
+  const blob = new Blob([JSON.stringify(res.bundle, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `tiktok-autoreply-config-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast(`Đã xuất cấu hình + ${res.bundle.memory?.length || 0} mẫu tự học!`);
+});
+
+$('btnImportConfig').addEventListener('click', () => {
+  $('importConfigFile').value = '';
+  $('importConfigFile').click();
+});
+
+$('importConfigFile').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    const parsed = JSON.parse(await file.text());
+    const res = await sendBg({ action: 'IMPORT_CONFIG', payload: parsed });
+    if (res?.ok) {
+      await loadState();
+      showToast(`Đã nhập cấu hình + ${res.importedMemoryCount || 0} mẫu tự học!`);
+    } else {
+      showToast(res?.error || 'File cấu hình không hợp lệ.', true);
+    }
+  } catch {
+    showToast('Không đọc được file JSON cấu hình.', true);
+  }
+});
+
 loadState();
 countdownTimer = setInterval(() => {
   renderCountdowns();

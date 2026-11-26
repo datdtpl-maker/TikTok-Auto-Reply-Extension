@@ -185,6 +185,11 @@
           <button class="btn secondary" id="btnTestApi">Test kết nối Gemini</button>
           <button class="btn primary" id="btnSaveAi">Lưu cấu hình AI</button>
         </div>
+        <div class="actions" style="margin-top:6px;">
+          <button class="btn ghost" id="btnExportConfig" type="button">Xuất cấu hình (.json)</button>
+          <button class="btn ghost" id="btnImportConfig" type="button">Nhập cấu hình (.json)</button>
+          <input type="file" id="importConfigFile" accept="application/json,.json" class="hidden" />
+        </div>
         <div class="notice hidden" id="apiTestResult"></div>
       </div>
 

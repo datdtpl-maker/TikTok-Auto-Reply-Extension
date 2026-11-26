@@ -290,12 +290,19 @@ async function appendLog(entry) {
   await chrome.storage.local.set({ [STORAGE_KEYS.LOGS]: logs });
 }
 
+const COMMENT_DEDUPE_TTL_MS = 15 * 60 * 1000; // 15 phút (DOM TikTok đã tự kiểm tra phản hồi thật)
+
 async function isProcessed(fingerprint) {
   const res = await chrome.storage.local.get(STORAGE_KEYS.PROCESSED);
   const map = res[STORAGE_KEYS.PROCESSED] || {};
   const entry = map[fingerprint];
   // Chỉ coi là đã xử lý nếu thực sự đã GỬI (không khóa các bản nháp demo!)
-  return Boolean(entry && !entry.draftOnly);
+  if (!entry || entry.draftOnly) return false;
+  // Với bình luận: nếu đã quá 15 phút và DOM thật không còn thấy phản hồi của shop (do chủ shop đã xóa) -> cho phép trả lời lại
+  if (entry.type === 'comment' && entry.ts && Date.now() - entry.ts > COMMENT_DEDUPE_TTL_MS) {
+    return false;
+  }
+  return true;
 }
 
 async function markProcessed(fingerprint, meta = {}) {
@@ -700,16 +707,6 @@ async function handleGenerateReply(payload) {
     }
     replyText = sanitizeReplyForTikTok(replyText, payload.type);
 
-    await appendLog({
-      level: 'info',
-      type: payload.type,
-      source: payload.source || payload.type,
-      customer: payload.customerName || 'Khách',
-      incoming: payload.latestText,
-      reply: replyText,
-      draftOnly: settings.draftOnly
-    });
-
     return { ok: true, replyText, draftOnly: settings.draftOnly };
   } catch (err) {
     await incrementStat('errors');
@@ -957,6 +954,40 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         case 'CLEAR_MEMORY': {
           await saveMemoryItems([]);
           sendResponse({ ok: true });
+          break;
+        }
+        case 'EXPORT_CONFIG': {
+          const [settings, memory] = await Promise.all([getSettings(), getMemoryItems()]);
+          sendResponse({
+            ok: true,
+            bundle: {
+              schemaVersion: 1,
+              exportedAt: new Date().toISOString(),
+              settings,
+              memory
+            }
+          });
+          break;
+        }
+        case 'IMPORT_CONFIG': {
+          const bundle = message.payload || {};
+          if (bundle.settings && typeof bundle.settings === 'object') {
+            await saveSettings(bundle.settings);
+          }
+          let importedMemoryCount = 0;
+          if (Array.isArray(bundle.memory)) {
+            const cleaned = bundle.memory.filter((it) => it && it.question && it.answer).slice(0, MAX_MEMORY_ITEMS);
+            await saveMemoryItems(cleaned);
+            importedMemoryCount = cleaned.length;
+          }
+          const nextSettings = await getSettings();
+          const tabs = await chrome.tabs.query({ url: ['https://www.tiktok.com/*', 'https://tiktok.com/*'] });
+          for (const tab of tabs) {
+            if (tab.id) {
+              chrome.tabs.sendMessage(tab.id, { action: 'SETTINGS_UPDATED', settings: nextSettings }).catch(() => {});
+            }
+          }
+          sendResponse({ ok: true, settings: nextSettings, importedMemoryCount });
           break;
         }
         case 'LOG_EVENT': {
